@@ -198,6 +198,7 @@ TcpGroups:
   IsHttps: false             #不是https                   
   SendHttp: ["test1"]        #发送的http   
 
+HTTPConfs:
 - Name: test2
   Proto: HTTP/1.1
   Method: POST
@@ -238,6 +239,12 @@ fs.file-max=1100000 //多留点buffer
 ```
 实测每个mmin进程最多70w个连接，多了就连接上不去了，所以建议多开几个窗口运行-S模式来并发几百万的连接
 
+nginx需要设置
+worker_connections 每个work可以建立的连接数
+由于客户端会等待发送，需要设置nginx超时时间
+client_body_timeout  500;
+client_header_timeout  500;
+send_timeout  500;
 测试配置
 
 ```yaml
@@ -265,6 +272,7 @@ TcpGroups:
   SendHttp: ["test1"]         #发送的http   
 - Name: group2                #类似group1,不过srcip建议分开
 ...
+HTTPConfs:
 - Name: test2
   Proto: HTTP/1.0             #设置http1.0,使服务端断开
   Method: GET
@@ -309,6 +317,7 @@ TcpGroups:
   IsHttps: false              #不是https                   
   SendHttp: ["test1"]         #发送的http   
 
+HTTPConfs:
 - Name: test2
   Proto: HTTP/1.0             #设置http1.0,使服务端断开
   Method: GET
@@ -341,6 +350,7 @@ TcpGroups:
   IsHttps: false             #不是https                   
   SendHttp: ["test1"]        #发送的http   
 
+HTTPConfs:
 - Name: test2
   Proto: HTTP/1.1
   Method: POST

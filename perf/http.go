@@ -22,7 +22,7 @@ func (h *HTTPconf) GetReqBytes() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "goperf")
+	req.Header.Set("User-Agent", "mmin")
 	for k, v := range h.Header {
 		req.Header.Set(k, v)
 	}

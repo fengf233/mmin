@@ -224,14 +224,21 @@ func (pool *ConnPool) getConn(dialer *net.Dialer) (net.Conn, error) {
 	}
 }
 
-// 获取连接
 func (pool *ConnPool) Get() *MyConn {
+	var myconn *MyConn
+	myconn = <-pool.connsChan
+	return myconn
+}
+
+// 获取连接
+func (pool *ConnPool) GetWithoutClose() *MyConn {
 	var myconn *MyConn
 	for {
 		select {
 		case <-pool.ctx.Done():
 			return nil
 		case myconn = <-pool.connsChan:
+			//判断连接是否断开
 			one := make([]byte, 1)
 			myconn.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
 			if _, err := myconn.Read(one); err == io.EOF {
@@ -290,16 +297,16 @@ func (pool *ConnPool) Close() {
 	// pool.wg.Wait()
 	close(pool.connsChan)
 	close(pool.factoryChan)
-	// for myconn1 := range pool.conns {
-	// 	myconn1.Close()
-	// 	if len(pool.conns) == 0 {
-	// 		break
-	// 	}
-	// }
-	// for myconn2 := range pool.factoryLine {
-	// 	myconn2.Close()
-	// 	if len(pool.factoryLine) == 0 {
-	// 		break
-	// 	}
-	// }
+	for myconn1 := range pool.connsChan {
+		myconn1.Close()
+		if len(pool.connsChan) == 0 {
+			break
+		}
+	}
+	for myconn2 := range pool.factoryChan {
+		myconn2.Close()
+		if len(pool.factoryChan) == 0 {
+			break
+		}
+	}
 }

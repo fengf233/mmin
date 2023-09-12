@@ -107,7 +107,7 @@ func (tg *TcpGroup) task() {
 }
 
 func (tg *TcpGroup) doReq(conn net.Conn, httpByte []byte) (*ReqResult, error) {
-	start_time := time.Now()
+	// start_time := time.Now()
 	// timeout := 5 * time.Second
 	// if err := conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
 	// 	return nil, err
@@ -119,6 +119,7 @@ func (tg *TcpGroup) doReq(conn net.Conn, httpByte []byte) (*ReqResult, error) {
 	// if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
 	// 	return nil, err
 	// }
+	start_time := time.Now()
 	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
 	if err != nil {
 		return nil, err
