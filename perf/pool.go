@@ -57,6 +57,7 @@ type ConnPool struct {
 	tlsConfig   *tls.Config
 	connsChan   chan *MyConn
 	factoryChan chan *MyConn
+	debug       bool
 }
 
 // 创建连接池
@@ -185,9 +186,11 @@ func (pool *ConnPool) creat(srcip string, maxConnPerIP int) {
 			}
 			conn, err := pool.getConn(&dialer)
 			if err != nil {
-				poolErrMu.Lock()
-				poolErr[err.Error()] += 1
-				poolErrMu.Unlock()
+				if pool.debug {
+					poolErrMu.Lock()
+					poolErr[err.Error()] += 1
+					poolErrMu.Unlock()
+				}
 				// time.Sleep(1 * time.Second)
 				continue
 			}

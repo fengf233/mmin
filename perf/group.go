@@ -59,6 +59,7 @@ func (tg *TcpGroup) InitPool() {
 		&tg.r.Receive,
 		&tg.r.Send,
 	)
+	tg.pool.debug = tg.ctx.debug
 	defer tg.ctx.wg.Done()
 }
 func (tg *TcpGroup) Run() {
