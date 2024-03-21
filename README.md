@@ -125,8 +125,8 @@ RemoteServer: {                     #指定远程服务器运行对应的group,�
 TcpGroups:              
 - Name: group1                      #group标志符,用于远程执行
   MaxTcpConnPerIP: 10000            #每个源IP创建最大的TCP连接数
-  TcpCreatThread: 1                 #初始化创建TCP的线程,一般为1就行,只是测大并发时可以调高
-  TcpConnThread: 10                 #循环生产TCP的线程,就是当MaxReqest满足关闭TCP后,补充创建TCP的线程
+  TcpCreatThread: 1                 #初始化创建TCP池的线程,一般为1就行,只是测大并发时可以调高
+  TcpConnThread: 10                 #循环生产TCP池的线程,就是当MaxReqest满足关闭TCP后,补充创建TCP的线程,长连接的情况设置ReqThread/MaxReqest就差不多了
   TcpCreatRate: 0                   #初始化创建TCP的速率,0为不限制
   SrcIP: ["2.0.0.19","2.0.0.100" ]  #源IP,为[]表示使用默认IP
   MaxQps: 500                       #发送http请求最大QPS 
