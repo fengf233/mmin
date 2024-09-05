@@ -32,7 +32,7 @@ type Report struct {
 	ctx           *RunCtx
 }
 
-//每个请求的结果
+// 每个请求的结果
 type ReqResult struct {
 	code    int
 	start   time.Time
@@ -112,8 +112,8 @@ func (r *Report) Printer() {
 			}
 			runtime := time.Now().Sub(r.StartTime).Seconds()
 			r.AvgRate = float32(float64(r.Success) / runtime)
-			r.AvgReceive = float32(float64(r.Receive) * 8.0 / 1024.0 / 1024.0 / runtime)
-			r.AvgSend = float32(float64(r.Send) * 8.0 / 1024.0 / 1024.0 / runtime)
+			r.AvgReceive = float32(float64(r.Receive) * 8.0 / 1000.0 / 1000.0 / runtime)
+			r.AvgSend = float32(float64(r.Send) * 8.0 / 1000.0 / 1000.0 / runtime)
 			fmt.Println("")
 			sumTabformat = sumTab.Print("*")
 			fmt.Printf(sumTabformat, "RunTime:", fmt.Sprintf("%f s", runtime))
@@ -145,8 +145,8 @@ func (r *Report) Printer() {
 				receive := atomic.LoadInt64(&r.Receive)
 				send := atomic.LoadInt64(&r.Send)
 				runtime := rr.start.Sub(r.StartTime).Seconds()
-				RMbps := float32(receive) * 8 / 1024 / 1024 / float32(runtime)
-				SMbps := float32(send) * 8 / 1024 / 1024 / float32(runtime)
+				RMbps := float32(receive) * 8 / 1000 / 1000 / float32(runtime)
+				SMbps := float32(send) * 8 / 1000 / 1000 / float32(runtime)
 				ReqTimeMs := float32(r.ReqTime) / float32(r.Rate)
 				r.AvgRate = float32(float64(r.Success) / runtime)
 				var Status string
