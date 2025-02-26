@@ -9,9 +9,6 @@ RemoteServer: {
 TcpGroups: 
 - Name: group1           
   MaxTcpConnPerIP: 10000            #每个源IP创建最大TCP连接数
-  TcpCreatThread: 1                 #初始化TCP的线程,一般为1就行,只是测大并发时可以调高
-  TcpConnThread: 10                 #生产TCP的线程
-  TcpCreatRate: 100                 #初始化TCP的速率
   SrcIP: ["2.0.0.19","2.0.0.100" ]  #源IP,为[]表示使用默认IP
   MaxQps: 500                       #发送http请求最大QPS 
   Dst: 2.0.0.67:80                  #TCP目的地址
@@ -41,6 +38,7 @@ HTTPConfs:
     "test":"faf"
   }
   Body: ""
+  FileUpload: ""
   UseParams: ["aaa","bbb"]
 
 

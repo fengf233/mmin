@@ -32,6 +32,12 @@ type TcpGroup struct {
 }
 
 func (tg *TcpGroup) Init(ctx *RunCtx, r *Report, reqMap map[string]*HTTPconf) {
+	if tg.TcpConnThread == 0 {
+		tg.TcpConnThread = tg.ReqThread/tg.MaxReqest + 1
+	}
+	if tg.TcpCreatThread == 0 {
+		tg.TcpCreatThread = len(tg.SrcIP)/2 + 1
+	}
 	for _, sendHttpName := range tg.SendHttp {
 		httpConf := reqMap[sendHttpName]
 		if httpConf != nil {
