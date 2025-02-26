@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -104,7 +105,10 @@ func (tg *TcpGroup) Run() {
 func (tg *TcpGroup) task() {
 	defer func() {
 		tg.ctx.wg.Done()
-		if v := recover(); v != nil && v != sendOnCloseError {
+		if v := recover(); v != nil {
+			if v == sendOnCloseError || strings.Contains(fmt.Sprint(v), "send on closed channel") {
+				return
+			}
 			log.Printf("panic in task: %v", v)
 			panic(v)
 		}
@@ -135,8 +139,13 @@ func (tg *TcpGroup) task() {
 					continue
 				}
 
+				select {
+				case tg.r.maxResultChan <- rr:
+				default:
+					return
+				}
+
 				reqCount++
-				tg.r.maxResultChan <- rr
 			} else {
 				reqCount = 0
 				tg.pool.Put(conn)

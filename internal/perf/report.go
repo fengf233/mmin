@@ -85,9 +85,7 @@ func (r *Report) Printer() {
 	defer r.ctx.wg.Done()
 
 	rowTab := r.createRowTable()
-	sumTab := r.createSumTable()
 	rowFormat := rowTab.Print("*")
-	sumFormat := sumTab.Print("*")
 
 	lastPrintTime := time.Now()
 	isStarted := false
@@ -95,7 +93,7 @@ func (r *Report) Printer() {
 	for {
 		select {
 		case <-r.ctx.ctx.Done():
-			r.printFinalReport(sumFormat)
+			r.printFinalReport()
 			return
 
 		case result := <-r.maxResultChan:
@@ -196,7 +194,10 @@ func (r *Report) printErrors() {
 	r.rwlock.RUnlock()
 }
 
-func (r *Report) printFinalReport(sumFormat string) {
+func (r *Report) printFinalReport() {
+	sumTab := r.createSumTable()
+	sumFormat := sumTab.Print("*")
+
 	runtime := time.Now().Sub(r.StartTime).Seconds()
 	r.AvgRate = float32(float64(r.Success) / runtime)
 	r.AvgReceive = float32(float64(r.Receive) * 8.0 / 1000.0 / 1000.0 / runtime)
