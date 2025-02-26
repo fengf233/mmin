@@ -2,9 +2,15 @@ package perf
 
 import (
 	"bytes"
-	"log"
+	"fmt"
 	"mmin/internal/encoder"
 	"strconv"
+)
+
+// 支持的参数类型
+const (
+	TypeRandomInt = "RandomInt"
+	TypeRandomStr = "RandomStr"
 )
 
 var Randomer = encoder.NewRandomer()
@@ -15,38 +21,26 @@ type ParamsConf struct {
 	Spec map[string]string `yaml:"Spec"`
 }
 
-func (pc *ParamsConf) GetParams() Params {
-	var err error
-	if pc.Type == "RandomInt" {
-		params := &RandomInt{}
-		params.start, err = strconv.Atoi(pc.Spec["Start"])
-		if err != nil {
-			params.start = 0
-		}
-		params.end, err = strconv.Atoi(pc.Spec["End"])
-		if err != nil {
-			params.end = 10
-		}
-		params.name = []byte("${" + pc.Name + "}")
-		return params
-	} else if pc.Type == "RandomStr" {
-		params := &RandomStr{}
-		params.length, err = strconv.Atoi(pc.Spec["Length"])
-		if err != nil {
-			params.length = 10
-		}
-		params.name = []byte("${" + pc.Name + "}")
-		return params
-	} else {
-		log.Fatalf("have no %s param type", pc.Type)
+func (pc *ParamsConf) GetParams() (Params, error) {
+	switch pc.Type {
+	case TypeRandomInt:
+		return newRandomInt(pc)
+	case TypeRandomStr:
+		return newRandomStr(pc)
+	default:
+		return nil, fmt.Errorf("unsupported param type: %s", pc.Type)
 	}
-	return nil
 }
 
+// GetParamsMap 将参数配置转换为参数映射
 func GetParamsMap(paramsConfs []*ParamsConf) map[string]Params {
-	paramsMap := map[string]Params{}
+	paramsMap := make(map[string]Params, len(paramsConfs))
 	for _, pc := range paramsConfs {
-		paramsMap[pc.Name] = pc.GetParams()
+		params, err := pc.GetParams()
+		if err != nil {
+			continue // 跳过错误的配置
+		}
+		paramsMap[pc.Name] = params
 	}
 	return paramsMap
 }
@@ -61,9 +55,26 @@ type RandomInt struct {
 	name  []byte
 }
 
+func newRandomInt(pc *ParamsConf) (*RandomInt, error) {
+	start, err := strconv.Atoi(pc.Spec["Start"])
+	if err != nil {
+		start = 0 // 使用默认值
+	}
+
+	end, err := strconv.Atoi(pc.Spec["End"])
+	if err != nil {
+		end = 10 // 使用默认值
+	}
+
+	return &RandomInt{
+		start: start,
+		end:   end,
+		name:  []byte("${" + pc.Name + "}"),
+	}, nil
+}
+
 func (r *RandomInt) replace(src []byte) []byte {
-	new := Randomer.IntBytes(r.start, r.end)
-	return bytes.Replace(src, r.name, new, -1)
+	return bytes.Replace(src, r.name, Randomer.IntBytes(r.start, r.end), -1)
 }
 
 type RandomStr struct {
@@ -71,7 +82,18 @@ type RandomStr struct {
 	name   []byte
 }
 
+func newRandomStr(pc *ParamsConf) (*RandomStr, error) {
+	length, err := strconv.Atoi(pc.Spec["Length"])
+	if err != nil {
+		length = 10 // 使用默认值
+	}
+
+	return &RandomStr{
+		length: length,
+		name:   []byte("${" + pc.Name + "}"),
+	}, nil
+}
+
 func (r *RandomStr) replace(src []byte) []byte {
-	new := Randomer.StrBytes(r.length)
-	return bytes.Replace(src, r.name, new, -1)
+	return bytes.Replace(src, r.name, Randomer.StrBytes(r.length), -1)
 }

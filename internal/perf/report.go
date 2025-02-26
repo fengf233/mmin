@@ -14,6 +14,12 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+const (
+	printInterval = time.Second
+	maxRetries    = 5
+)
+
+// Report 性能测试报告结构
 type Report struct {
 	Success       int64          `yaml:"success"`    //总成功数
 	Rate          int64          `yaml:"rate"`       //1秒内速率,实时速率
@@ -30,9 +36,10 @@ type Report struct {
 	maxResultChan chan *ReqResult
 	rwlock        *sync.RWMutex
 	ctx           *RunCtx
+	est           *quantile.Stream
 }
 
-// 每个请求的结果
+// ReqResult 请求结果
 type ReqResult struct {
 	code    int
 	start   time.Time
@@ -40,25 +47,27 @@ type ReqResult struct {
 }
 
 func NewReport(ctx *RunCtx, maxResult int) *Report {
-	r := &Report{
+	return &Report{
 		Success:       0,
 		Rate:          0,
 		Receive:       0,
 		Send:          0,
 		AvgRate:       0,
-		Respcode:      map[int]int{},
-		ErrMap:        map[string]int{},
+		Respcode:      make(map[int]int),
+		ErrMap:        make(map[string]int),
 		maxResultChan: make(chan *ReqResult, maxResult),
 		ctx:           ctx,
+		rwlock:        &sync.RWMutex{},
+		est:           quantile.NewTargeted(quantilesTarget),
 	}
-	var rwlock sync.RWMutex
-	r.rwlock = &rwlock
-	return r
 }
 
 func (r *Report) WriteErr(err error) {
+	if err == nil {
+		return
+	}
 	r.rwlock.Lock()
-	r.ErrMap[err.Error()] += 1
+	r.ErrMap[err.Error()]++
 	r.rwlock.Unlock()
 }
 
@@ -74,108 +83,140 @@ var quantilesTarget = map[float64]float64{
 
 func (r *Report) Printer() {
 	defer r.ctx.wg.Done()
-	is_start := false
-	tmp_start_time := time.Now()
-	var rowTabformat string
-	rowTab := tabular.New()
-	rowTab.Col("Time", "Time", 10)
-	rowTab.Col("Success", "Success", 12)
-	rowTab.Col("Rate", "Rate", 12)
-	rowTab.Col("ReqTime", "ReqTime", 12)
-	rowTab.Col("Send", "Send", 12)
-	rowTab.Col("Receive", "Receive", 12)
-	rowTab.Col("Status", "Status", 20)
-	var sumTabformat string
-	sumTab := tabular.New()
-	sumTab.Col("Result", "Result", 10)
-	sumTab.Col("Statistics", "Statistics", 85)
 
-	est := quantile.NewTargeted(quantilesTarget)
+	rowTab := r.createRowTable()
+	sumTab := r.createSumTable()
+	rowFormat := rowTab.Print("*")
+	sumFormat := sumTab.Print("*")
+
+	lastPrintTime := time.Now()
+	isStarted := false
+
 	for {
 		select {
 		case <-r.ctx.ctx.Done():
-			if len(r.maxResultChan) != 0 {
-				for rr := range r.maxResultChan {
-					r.Success += 1
-					r.Rate += 1
-					r.Respcode[rr.code] += 1
-					r.ReqTime += float64(rr.reqtime) / 1e6
-					r.AllReqTime += float64(rr.reqtime) / 1e6
-					if len(r.maxResultChan) == 0 {
-						break
-					}
-				}
-			}
-			var Status string
-			for k, v := range r.Respcode {
-				Status = Status + "[" + strconv.Itoa(k) + "]" + ":" + strconv.Itoa(v)
-			}
-			runtime := time.Now().Sub(r.StartTime).Seconds()
-			r.AvgRate = float32(float64(r.Success) / runtime)
-			r.AvgReceive = float32(float64(r.Receive) * 8.0 / 1000.0 / 1000.0 / runtime)
-			r.AvgSend = float32(float64(r.Send) * 8.0 / 1000.0 / 1000.0 / runtime)
-			fmt.Println("")
-			sumTabformat = sumTab.Print("*")
-			fmt.Printf(sumTabformat, "RunTime:", fmt.Sprintf("%f s", runtime))
-			fmt.Printf(sumTabformat, "Success:", r.Success)
-			fmt.Printf(sumTabformat, "AvgRate:", fmt.Sprintf("%f Req/s", r.AvgRate))
-			fmt.Printf(sumTabformat, "ReqTime:", fmt.Sprintf("%f ms", float32(r.AllReqTime)/float32(r.Success)))
-			fmt.Printf(sumTabformat, "Send:", fmt.Sprintf("%f Mbps", r.AvgSend))
-			fmt.Printf(sumTabformat, "Receive:", fmt.Sprintf("%f Mbps", r.AvgReceive))
-			fmt.Printf(sumTabformat, "Status:", Status)
-			var reqTimeQuantiles string
-			for _, quantile := range quantiles {
-				values := est.Query(quantile)
-				t_str := fmt.Sprintf("%d: %f ", int(quantile*100), values)
-				reqTimeQuantiles += t_str
-			}
-			fmt.Printf(sumTabformat, "ReqTime Quantile:", reqTimeQuantiles)
-			close(r.maxResultChan)
+			r.printFinalReport(sumFormat)
 			return
-		case rr := <-r.maxResultChan:
-			if is_start == false {
-				tmp_start_time = rr.start
-				r.rwlock.Lock()
-				r.StartTime = rr.start
-				r.rwlock.Unlock()
-				is_start = true
-				rowTabformat = rowTab.Print("*")
+
+		case result := <-r.maxResultChan:
+			if !isStarted {
+				r.initStartTime(result.start)
+				isStarted = true
+				lastPrintTime = result.start
+				continue
 			}
-			if rr.start.Sub(tmp_start_time).Milliseconds() > 1000 {
-				receive := atomic.LoadInt64(&r.Receive)
-				send := atomic.LoadInt64(&r.Send)
-				runtime := rr.start.Sub(r.StartTime).Seconds()
-				RMbps := float32(receive) * 8 / 1000 / 1000 / float32(runtime)
-				SMbps := float32(send) * 8 / 1000 / 1000 / float32(runtime)
-				ReqTimeMs := float32(r.ReqTime) / float32(r.Rate)
-				r.AvgRate = float32(float64(r.Success) / runtime)
-				var Status string
-				for k, v := range r.Respcode {
-					Status = Status + "[" + strconv.Itoa(k) + "]" + ":" + strconv.Itoa(v)
-				}
-				errString := ""
-				if r.ctx.debug {
-					r.rwlock.RLock()
-					for errK, errY := range r.ErrMap {
-						errString = errString + errK + ":" + strconv.Itoa(errY) + "\n"
-					}
-					r.rwlock.RUnlock()
-					fmt.Print(errString)
-				}
-				fmt.Printf(rowTabformat, float32(time.Since(r.StartTime).Seconds()), r.Success, r.Rate, ReqTimeMs, SMbps, RMbps, Status)
-				tmp_start_time = rr.start
-				r.Rate = 0
-				r.ReqTime = 0
+
+			r.updateStats(result)
+
+			if result.start.Sub(lastPrintTime) >= printInterval {
+				r.printProgress(rowFormat, result.start)
+				lastPrintTime = result.start
 			}
-			r.Success += 1
-			r.Rate += 1
-			r.Respcode[rr.code] += 1
-			r.ReqTime += float64(rr.reqtime) / 1e6
-			est.Insert(float64(rr.reqtime) / 1e6)
-			r.AllReqTime += float64(rr.reqtime) / 1e6
 		default:
 		}
 	}
+}
+
+func (r *Report) createRowTable() *tabular.Table {
+	tab := tabular.New()
+	tab.Col("Time", "Time", 10)
+	tab.Col("Success", "Success", 12)
+	tab.Col("Rate", "Rate", 12)
+	tab.Col("ReqTime", "ReqTime", 12)
+	tab.Col("Send", "Send", 12)
+	tab.Col("Receive", "Receive", 12)
+	tab.Col("Status", "Status", 20)
+	return &tab
+}
+
+func (r *Report) createSumTable() *tabular.Table {
+	tab := tabular.New()
+	tab.Col("Result", "Result", 10)
+	tab.Col("Statistics", "Statistics", 85)
+	return &tab
+}
+
+func (r *Report) initStartTime(t time.Time) {
+	r.rwlock.Lock()
+	r.StartTime = t
+	r.rwlock.Unlock()
+}
+
+func (r *Report) updateStats(result *ReqResult) {
+	atomic.AddInt64(&r.Success, 1)
+	atomic.AddInt64(&r.Rate, 1)
+	r.rwlock.Lock()
+	r.Respcode[result.code]++
+	r.ReqTime += float64(result.reqtime) / 1e6
+	r.AllReqTime += float64(result.reqtime) / 1e6
+	r.est.Insert(float64(result.reqtime) / 1e6)
+	r.rwlock.Unlock()
+}
+
+func (r *Report) printProgress(format string, now time.Time) {
+	receive := atomic.LoadInt64(&r.Receive)
+	send := atomic.LoadInt64(&r.Send)
+	runtime := now.Sub(r.StartTime).Seconds()
+
+	r.rwlock.RLock()
+	status := r.formatStatus()
+	reqTimeMs := float32(r.ReqTime) / float32(r.Rate)
+	r.rwlock.RUnlock()
+
+	rMbps := float32(receive) * 8 / 1000 / 1000 / float32(runtime)
+	sMbps := float32(send) * 8 / 1000 / 1000 / float32(runtime)
+
+	fmt.Printf(format,
+		float32(time.Since(r.StartTime).Seconds()),
+		r.Success, r.Rate, reqTimeMs, sMbps, rMbps, status)
+
+	if r.ctx.debug {
+		r.printErrors()
+	}
+
+	atomic.StoreInt64(&r.Rate, 0)
+	r.rwlock.Lock()
+	r.ReqTime = 0
+	r.rwlock.Unlock()
+}
+
+func (r *Report) formatStatus() string {
+	var status string
+	for k, v := range r.Respcode {
+		status += "[" + strconv.Itoa(k) + "]" + ":" + strconv.Itoa(v)
+	}
+	return status
+}
+
+func (r *Report) printErrors() {
+	r.rwlock.RLock()
+	for errK, errY := range r.ErrMap {
+		fmt.Println(errK + ":" + strconv.Itoa(errY))
+	}
+	r.rwlock.RUnlock()
+}
+
+func (r *Report) printFinalReport(sumFormat string) {
+	runtime := time.Now().Sub(r.StartTime).Seconds()
+	r.AvgRate = float32(float64(r.Success) / runtime)
+	r.AvgReceive = float32(float64(r.Receive) * 8.0 / 1000.0 / 1000.0 / runtime)
+	r.AvgSend = float32(float64(r.Send) * 8.0 / 1000.0 / 1000.0 / runtime)
+	fmt.Println("")
+	fmt.Printf(sumFormat, "RunTime:", fmt.Sprintf("%f s", runtime))
+	fmt.Printf(sumFormat, "Success:", r.Success)
+	fmt.Printf(sumFormat, "AvgRate:", fmt.Sprintf("%f Req/s", r.AvgRate))
+	fmt.Printf(sumFormat, "ReqTime:", fmt.Sprintf("%f ms", float32(r.AllReqTime)/float32(r.Success)))
+	fmt.Printf(sumFormat, "Send:", fmt.Sprintf("%f Mbps", r.AvgSend))
+	fmt.Printf(sumFormat, "Receive:", fmt.Sprintf("%f Mbps", r.AvgReceive))
+	fmt.Printf(sumFormat, "Status:", r.formatStatus())
+	var reqTimeQuantiles string
+	for _, quantile := range quantiles {
+		values := r.est.Query(quantile)
+		t_str := fmt.Sprintf("%d: %f ", int(quantile*100), values)
+		reqTimeQuantiles += t_str
+	}
+	fmt.Printf(sumFormat, "ReqTime Quantile:", reqTimeQuantiles)
+	close(r.maxResultChan)
 }
 
 func (r *Report) RemotePrinter(remoteDst string) {

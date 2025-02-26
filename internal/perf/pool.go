@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"strconv"
 	"sync"
@@ -15,25 +16,30 @@ import (
 	"golang.org/x/time/rate"
 )
 
+const (
+	defaultReadTimeout = 10 * time.Millisecond
+	defaultDialTimeout = 5 * time.Second
+)
+
 type MyConn struct {
 	net.Conn
 	r, w   *int64
 	dialer *net.Dialer
 }
 
+// Read wraps the underlying connection's Read method and tracks bytes read
 func (c *MyConn) Read(b []byte) (n int, err error) {
 	sz, err := c.Conn.Read(b)
-
-	if err == nil {
+	if err == nil && sz > 0 {
 		atomic.AddInt64(c.r, int64(sz))
 	}
 	return sz, err
 }
 
+// Write wraps the underlying connection's Write method and tracks bytes written
 func (c *MyConn) Write(b []byte) (n int, err error) {
 	sz, err := c.Conn.Write(b)
-
-	if err == nil {
+	if err == nil && sz > 0 {
 		atomic.AddInt64(c.w, int64(sz))
 	}
 	return sz, err
@@ -58,14 +64,17 @@ type ConnPool struct {
 	connsChan   chan *MyConn
 	factoryChan chan *MyConn
 	debug       bool
+
+	stats struct {
+		active  int32
+		failed  int32
+		created int32
+	}
 }
 
 // 创建连接池
-func NewConnPool(dst string, srcIP []string, maxConnPerIP int, creatThread int, creatRate int, connThread int, isHttps bool, r *int64, w *int64) *ConnPool {
-	srcIPLen := 1
-	if len(srcIP) != 0 {
-		srcIPLen = len(srcIP)
-	}
+func NewConnPool(dst string, srcIP []string, maxConnPerIP int, creatThread int, creatRate int, connThread int, isHttps bool, r *int64, w *int64, connTimeout time.Duration) *ConnPool {
+	srcIPLen := max(1, len(srcIP))
 	maxConn := srcIPLen * maxConnPerIP
 	atomic.AddInt32(&allPoolMaxConn, int32(maxConn))
 	connsChan := make(chan *MyConn, maxConn)
@@ -175,35 +184,45 @@ func PoolPrint(wg *sync.WaitGroup) {
 
 func (pool *ConnPool) creat(srcip string, maxConnPerIP int) {
 	defer pool.wg.Done()
-	maxConnPerIPCount := 0
-	for {
-		if maxConnPerIPCount < maxConnPerIP {
-			pool.rl.Wait(pool.ctx)
-			var dialer net.Dialer
-			var conn net.Conn
-			if srcip != "" {
-				dialer.LocalAddr = &net.TCPAddr{IP: net.ParseIP(srcip)}
+
+	dialer := &net.Dialer{
+		Timeout: defaultDialTimeout,
+	}
+
+	if srcip != "" {
+		dialer.LocalAddr = &net.TCPAddr{IP: net.ParseIP(srcip)}
+	}
+
+	for created := 0; created < maxConnPerIP; created++ {
+		if err := pool.rl.Wait(pool.ctx); err != nil {
+			return // context cancelled
+		}
+
+		conn, err := pool.getConn(dialer)
+		if err != nil {
+			atomic.AddInt32(&pool.stats.failed, 1)
+			if pool.debug {
+				poolErrMu.Lock()
+				poolErr[err.Error()]++
+				poolErrMu.Unlock()
 			}
-			conn, err := pool.getConn(&dialer)
-			if err != nil {
-				if pool.debug {
-					poolErrMu.Lock()
-					poolErr[err.Error()] += 1
-					poolErrMu.Unlock()
-				}
-				// time.Sleep(1 * time.Second)
-				continue
-			}
-			myconn := &MyConn{
-				dialer: &dialer,
-				Conn:   conn,
-				r:      pool.r,
-				w:      pool.w,
-			}
-			pool.connsChan <- myconn
-			maxConnPerIPCount += 1
+			continue
+		}
+
+		myconn := &MyConn{
+			dialer: dialer,
+			Conn:   conn,
+			r:      pool.r,
+			w:      pool.w,
+		}
+
+		select {
+		case pool.connsChan <- myconn:
+			atomic.AddInt32(&pool.stats.created, 1)
+			atomic.AddInt32(&pool.stats.active, 1)
 			atomic.AddInt32(&poolConnCount, 1)
-		} else {
+		case <-pool.ctx.Done():
+			myconn.Close()
 			return
 		}
 	}
@@ -228,59 +247,74 @@ func (pool *ConnPool) getConn(dialer *net.Dialer) (net.Conn, error) {
 }
 
 func (pool *ConnPool) Get() *MyConn {
-	var myconn *MyConn
-	myconn = <-pool.connsChan
+	myconn := <-pool.connsChan
 	return myconn
 }
 
 // 获取连接
 func (pool *ConnPool) GetWithoutClose() *MyConn {
-	var myconn *MyConn
 	for {
 		select {
 		case <-pool.ctx.Done():
 			return nil
-		case myconn = <-pool.connsChan:
-			//判断连接是否断开
-			one := make([]byte, 1)
-			myconn.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
-			if _, err := myconn.Read(one); err == io.EOF {
-				pool.Put(myconn)
+		case conn := <-pool.connsChan:
+			if conn == nil {
 				continue
-			} else {
-				var zero time.Time
-				myconn.SetReadDeadline(zero)
-				return myconn
 			}
+
+			// Check connection health
+			one := make([]byte, 1)
+			if err := conn.SetReadDeadline(time.Now().Add(defaultReadTimeout)); err != nil {
+				pool.Put(conn)
+				continue
+			}
+
+			if _, err := conn.Read(one); err == io.EOF {
+				pool.Put(conn)
+				continue
+			}
+
+			// Reset read deadline
+			if err := conn.SetReadDeadline(time.Time{}); err != nil {
+				pool.Put(conn)
+				continue
+			}
+
+			return conn
 		}
 	}
 }
 
 func (pool *ConnPool) factory() {
+	defer pool.wg.Done()
 	defer func() {
-		pool.wg.Done()
-		v := recover()
-		if v != nil && v != sendOnCloseError {
-			panic(v)
+		if r := recover(); r != nil && r != sendOnCloseError {
+			log.Printf("Panic in connection factory: %v", r)
+			panic(r)
 		}
 	}()
+
 	for {
 		select {
 		case <-pool.ctx.Done():
 			return
-		case myconn, ok := <-pool.factoryChan:
+		case conn, ok := <-pool.factoryChan:
 			if !ok {
 				return
 			}
-			myconn.Conn.Close()
-			newconn, err := pool.getConn(myconn.dialer)
+
+			conn.Close()
+			atomic.AddInt32(&pool.stats.active, -1)
+
+			newConn, err := pool.getConn(conn.dialer)
 			if err != nil {
-				// fmt.Println("pool factory", err.Error())
-				pool.factoryChan <- myconn
+				pool.factoryChan <- conn // retry
 				continue
 			}
-			myconn.Conn = newconn
-			pool.connsChan <- myconn
+
+			conn.Conn = newConn
+			atomic.AddInt32(&pool.stats.active, 1)
+			pool.connsChan <- conn
 		}
 	}
 }
@@ -297,17 +331,22 @@ func (pool *ConnPool) Len() int {
 // 关闭连接池
 func (pool *ConnPool) Close() {
 	pool.cancel()
-	// pool.wg.Wait()
 	close(pool.connsChan)
 	close(pool.factoryChan)
-	for myconn1 := range pool.connsChan {
-		myconn1.Close()
+
+	// Close all connections in connsChan
+	for conn := range pool.connsChan {
+		conn.Close()
+		atomic.AddInt32(&pool.stats.active, -1)
 		if len(pool.connsChan) == 0 {
 			break
 		}
 	}
-	for myconn2 := range pool.factoryChan {
-		myconn2.Close()
+
+	// Close all connections in factoryChan
+	for conn := range pool.factoryChan {
+		conn.Close()
+		atomic.AddInt32(&pool.stats.active, -1)
 		if len(pool.factoryChan) == 0 {
 			break
 		}

@@ -17,6 +17,12 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+const (
+	minMaxResult = 8192
+	contentType  = "application/x-yaml"
+)
+
+// RunConf 运行配置
 type RunConf struct {
 	RunTime      int                 `yaml:"RunTime"`
 	Debug        bool                `yaml:"Debug"`
@@ -28,6 +34,7 @@ type RunConf struct {
 	report       *Report
 }
 
+// RunCtx 运行上下文
 type RunCtx struct {
 	wg     *sync.WaitGroup
 	ctx    context.Context
@@ -59,42 +66,46 @@ func ReadRunConfByByte(body []byte) (*RunConf, error) {
 
 var sendOnCloseError interface{}
 
-func (rc *RunConf) init() {
+func (rc *RunConf) init() error {
+	// 初始化上下文
 	ctx := &RunCtx{
+		wg:    &sync.WaitGroup{},
 		debug: rc.Debug,
 	}
-	var wg sync.WaitGroup
-	ctx.wg = &wg
 	ctx.ctx, ctx.cancel = context.WithCancel(context.Background())
-	var reqMap map[string]*HTTPconf = map[string]*HTTPconf{}
+	rc.ctx = ctx
+
+	// 初始化请求映射
+	reqMap := make(map[string]*HTTPconf, len(rc.HTTPconfs))
 	paramsMap := GetParamsMap(rc.ParamsConfs)
+
 	for _, httpConf := range rc.HTTPconfs {
 		httpConf.paramsMap = paramsMap
 		reqMap[httpConf.Name] = httpConf
 	}
+
+	// 计算最大结果数
+	maxResult := rc.calculateMaxResult()
+	report := NewReport(ctx, maxResult)
+	rc.report = report
+
+	// 初始化TCP组
+	for _, tg := range rc.TcpGroups {
+		tg.Init(ctx, report, reqMap)
+	}
+
+	return nil
+}
+
+func (rc *RunConf) calculateMaxResult() int {
 	maxResult := 0
 	for _, tg := range rc.TcpGroups {
 		maxResult += tg.MaxQPS
 	}
-	if maxResult < 8192 {
-		maxResult = 8192
+	if maxResult < minMaxResult {
+		maxResult = minMaxResult
 	}
-	report := NewReport(ctx, maxResult)
-	for _, tg := range rc.TcpGroups {
-		tg.Init(ctx, report, reqMap)
-	}
-	rc.report = report
-	rc.ctx = ctx
-
-	//捕获管道关闭异常,用于多个生产者当管道被消费者关闭时panic问题
-	defer func() {
-		sendOnCloseError = recover()
-	}()
-	func() {
-		cc := make(chan struct{}, 1)
-		close(cc)
-		cc <- struct{}{}
-	}()
+	return maxResult
 }
 
 func (rc *RunConf) Run() *Report {
@@ -102,26 +113,35 @@ func (rc *RunConf) Run() *Report {
 		rc.RemoteRun()
 		return nil
 	}
-	//初始化参数,tcp池
+
+	// 初始化
 	_, _ = maxprocs.Set()
-	rc.init()
+	if err := rc.init(); err != nil {
+		fmt.Printf("初始化失败: %v\n", err)
+		return nil
+	}
+
+	// 启动连接池
 	rc.ctx.wg.Add(1)
 	go PoolPrint(rc.ctx.wg)
+
 	for _, tg := range rc.TcpGroups {
 		rc.ctx.wg.Add(1)
 		go tg.InitPool()
 	}
 	rc.ctx.wg.Wait()
-	//开始运行发送请求
-	rc.ctx.wg.Add(1)
+
+	// 启动测试
+	rc.ctx.wg.Add(2)
 	go rc.report.Printer()
-	rc.ctx.wg.Add(1)
 	go rc.timer()
+
 	for _, tg := range rc.TcpGroups {
 		rc.ctx.wg.Add(1)
 		go tg.Run()
 	}
 	rc.ctx.wg.Wait()
+
 	return rc.report
 }
 
@@ -182,7 +202,7 @@ func (rc *RunConf) sendRemoteConf(remoteDst string, confList []string) {
 		fmt.Println("remoteDst:", remoteDst, "err:", err.Error())
 		return
 	}
-	req.Header.Set("Content-Type", "application/x-yaml")
+	req.Header.Set("Content-Type", contentType)
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -205,42 +225,35 @@ func (rc *RunConf) timer() {
 	defer rc.ctx.wg.Done()
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	defer close(signals)
+
 	for {
 		select {
 		case <-signals:
-			rc.ctx.cancel()
-			for _, tg := range rc.TcpGroups {
-				if tg.pool == nil {
-					os.Exit(0)
-				}
-				tg.pool.Close()
-			}
-			signal.Stop(signals)
-			close(signals)
-			// os.Exit(0)
+			rc.shutdown()
 			return
 		default:
-			if rc.report.StartTime.IsZero() {
-				continue
-			}
-			if time.Now().Sub(rc.report.StartTime).Seconds() > float64(rc.RunTime) {
-				// fmt.Println("sgo:", runtime.NumGoroutine())
-				rc.ctx.cancel()
-				for _, tg := range rc.TcpGroups {
-					tg.pool.Close()
-				}
-				// //调试用
-				// time.Sleep(2 * time.Second)
-				// fmt.Println("figo:", runtime.NumGoroutine())
-				// // 访问/debug/pprof/goroutine?debug=2
-				// go func() {
-				// 	fmt.Println("pprof start...")
-				// 	fmt.Println(http.ListenAndServe(":9876", nil))
-				// }()
-				signal.Stop(signals)
-				close(signals)
+			if rc.shouldStop() {
+				rc.shutdown()
 				return
 			}
+		}
+	}
+}
+
+func (rc *RunConf) shouldStop() bool {
+	if rc.report.StartTime.IsZero() {
+		return false
+	}
+	return time.Since(rc.report.StartTime).Seconds() > float64(rc.RunTime)
+}
+
+func (rc *RunConf) shutdown() {
+	rc.ctx.cancel()
+	for _, tg := range rc.TcpGroups {
+		if tg.pool != nil {
+			tg.pool.Close()
 		}
 	}
 }
