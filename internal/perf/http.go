@@ -12,14 +12,14 @@ import (
 
 // HTTPconf represents HTTP request configuration
 type HTTPconf struct {
-	Name       string            `yaml:"Name"`
-	Proto      string            `yaml:"Proto"`
-	Method     string            `yaml:"Method"`
-	URI        string            `yaml:"URI"`
-	Header     map[string]string `yaml:"Header"`
-	Body       string            `yaml:"Body"`
-	UseParams  []string          `yaml:"UseParams"`
-	FileUpload string            `yaml:"FileUpload"`
+	Name       string            `yaml:"Name" json:"Name"`
+	Proto      string            `yaml:"Proto" json:"Proto"`
+	Method     string            `yaml:"Method" json:"Method"`
+	URI        string            `yaml:"URI" json:"URI"`
+	Header     map[string]string `yaml:"Header" json:"Header"`
+	Body       string            `yaml:"Body" json:"Body"`
+	UseParams  []string          `yaml:"UseParams" json:"UseParams"`
+	FileUpload string            `yaml:"FileUpload" json:"FileUpload"`
 	reqBytes   []byte
 	paramsMap  map[string]Params
 }

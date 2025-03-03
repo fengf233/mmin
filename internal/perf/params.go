@@ -16,9 +16,9 @@ const (
 var Randomer = encoder.NewRandomer()
 
 type ParamsConf struct {
-	Name string            `yaml:"Name"`
-	Type string            `yaml:"Type"`
-	Spec map[string]string `yaml:"Spec"`
+	Name string   `yaml:"Name" json:"Name"`
+	Type string   `yaml:"Type" json:"Type"`
+	Spec []string `yaml:"Spec" json:"Spec"`
 }
 
 func (pc *ParamsConf) GetParams() (Params, error) {
@@ -56,14 +56,19 @@ type RandomInt struct {
 }
 
 func newRandomInt(pc *ParamsConf) (*RandomInt, error) {
-	start, err := strconv.Atoi(pc.Spec["Start"])
-	if err != nil {
-		start = 0 // 使用默认值
+	start := 0 // 默认值
+	end := 10  // 默认值
+
+	if len(pc.Spec) > 0 {
+		if s, err := strconv.Atoi(pc.Spec[0]); err == nil {
+			start = s
+		}
 	}
 
-	end, err := strconv.Atoi(pc.Spec["End"])
-	if err != nil {
-		end = 10 // 使用默认值
+	if len(pc.Spec) > 1 {
+		if e, err := strconv.Atoi(pc.Spec[1]); err == nil {
+			end = e
+		}
 	}
 
 	return &RandomInt{
@@ -83,9 +88,12 @@ type RandomStr struct {
 }
 
 func newRandomStr(pc *ParamsConf) (*RandomStr, error) {
-	length, err := strconv.Atoi(pc.Spec["Length"])
-	if err != nil {
-		length = 10 // 使用默认值
+	length := 10 // 默认值
+
+	if len(pc.Spec) > 0 {
+		if l, err := strconv.Atoi(pc.Spec[0]); err == nil {
+			length = l
+		}
 	}
 
 	return &RandomStr{

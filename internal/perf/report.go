@@ -21,18 +21,18 @@ const (
 
 // Report 性能测试报告结构
 type Report struct {
-	Success       int64          `yaml:"success"`    //总成功数
-	Rate          int64          `yaml:"rate"`       //1秒内速率,实时速率
-	Receive       int64          `yaml:"receive"`    //总收流量
-	Send          int64          `yaml:"send"`       //总发流量
-	ReqTime       float64        `yaml:"reqTime"`    //1秒内响应时间,实时速率
-	AllReqTime    float64        `yaml:"allReqTime"` //总响应时间,用于计算平均响应时间
-	AvgRate       float32        `yaml:"avgRate"`    //平均速率
-	AvgReceive    float32        `yaml:"avgReceive"` //平均响应吞吐
-	AvgSend       float32        `yaml:"avgSend"`    //平均发送吞吐
-	StartTime     time.Time      `yaml:"start_time"`
-	Respcode      map[int]int    `yaml:"respcode"`
-	ErrMap        map[string]int `yaml:"errMap"`
+	Success       int64          `yaml:"success" json:"success"`       //总成功数
+	Rate          int64          `yaml:"rate" json:"rate"`             //1秒内速率,实时速率
+	Receive       int64          `yaml:"receive" json:"receive"`       //总收流量
+	Send          int64          `yaml:"send" json:"send"`             //总发流量
+	ReqTime       float64        `yaml:"reqTime" json:"reqTime"`       //1秒内响应时间,实时速率
+	AllReqTime    float64        `yaml:"allReqTime" json:"allReqTime"` //总响应时间,用于计算平均响应时间
+	AvgRate       float32        `yaml:"avgRate" json:"avgRate"`       //平均速率
+	AvgReceive    float32        `yaml:"avgReceive" json:"avgReceive"` //平均响应吞吐
+	AvgSend       float32        `yaml:"avgSend" json:"avgSend"`       //平均发送吞吐
+	StartTime     time.Time      `yaml:"start_time" json:"start_time"`
+	Respcode      map[int]int    `yaml:"respcode" json:"respcode"`
+	ErrMap        map[string]int `yaml:"errMap" json:"errMap"`
 	maxResultChan chan *ReqResult
 	rwlock        *sync.RWMutex
 	ctx           *RunCtx

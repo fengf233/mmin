@@ -17,21 +17,21 @@ const (
 )
 
 type TcpGroup struct {
-	Name            string   `yaml:"Name"`
-	MaxTcpConnPerIP int      `yaml:"MaxTcpConnPerIP"`
-	TcpConnThread   int      `yaml:"TcpConnThread"`
-	TcpCreatThread  int      `yaml:"TcpCreatThread"`
-	TcpCreatRate    int      `yaml:"TcpCreatRate"`
-	WriteTimeout    int      `yaml:"WriteTimeout"`
-	ReadTimeout     int      `yaml:"ReadTimeout"`
-	ConnTimeout     int      `yaml:"ConnTimeout"`
-	SrcIP           []string `yaml:"SrcIP"`
-	MaxQPS          int      `yaml:"MaxQps"`
-	Dst             string   `yaml:"Dst"`
-	ReqThread       int      `yaml:"ReqThread"`
-	MaxReqest       int      `yaml:"MaxReqest"`
-	IsHttps         bool     `yaml:"IsHttps"`
-	SendHttp        []string `yaml:"SendHttp"`
+	Name            string   `yaml:"Name" json:"Name"`
+	MaxTcpConnPerIP int      `yaml:"MaxTcpConnPerIP" json:"MaxTcpConnPerIP"`
+	TcpConnThread   int      `yaml:"TcpConnThread" json:"TcpConnThread"`
+	TcpCreatThread  int      `yaml:"TcpCreatThread" json:"TcpCreatThread"`
+	TcpCreatRate    int      `yaml:"TcpCreatRate" json:"TcpCreatRate"`
+	WriteTimeout    int      `yaml:"WriteTimeout" json:"WriteTimeout"`
+	ReadTimeout     int      `yaml:"ReadTimeout" json:"ReadTimeout"`
+	ConnTimeout     int      `yaml:"ConnTimeout" json:"ConnTimeout"`
+	SrcIP           []string `yaml:"SrcIP" json:"SrcIP"`
+	MaxQPS          int      `yaml:"MaxQps" json:"MaxQps"`
+	Dst             string   `yaml:"Dst" json:"Dst"`
+	ReqThread       int      `yaml:"ReqThread" json:"ReqThread"`
+	MaxReqest       int      `yaml:"MaxReqest" json:"MaxReqest"`
+	IsHttps         bool     `yaml:"IsHttps" json:"IsHttps"`
+	SendHttp        []string `yaml:"SendHttp" json:"SendHttp"`
 
 	sendHttpConfs []*HTTPconf
 	pool          *ConnPool

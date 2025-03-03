@@ -20,14 +20,10 @@ TcpGroups:
 Params: 
 - Name: aaa
   Type: RandomInt
-  Spec: 
-    Start: 1
-    End: 10
+  Spec: [1,10]
 - Name: bbb
   Type: RandomStr
-  Spec: 
-    Length: 10
-
+  Spec: [10]
 
 HTTPConfs:
 - Name: test1

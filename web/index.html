@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>性能测试工具</title>
+    <link rel="stylesheet" href="static/layui/css/layui.css">
+    <script src="static/layui/layui.js"></script>
+    <script src="static/echarts.min.js"></script>
+    <style>
+        .layui-layout-admin .layui-body {
+            padding: 15px;
+        }
+        .chart-container {
+            height: 300px;
+            margin-bottom: 20px;
+        }
+        .data-overview {
+            padding: 10px;
+        }
+        .data-card {
+            text-align: center;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 2px;
+            box-shadow: 0 1px 2px 0 rgba(0,0,0,.05);
+        }
+        .data-card h2 {
+            font-size: 24px;
+            color: #009688;
+        }
+        .data-card p {
+            margin-top: 10px;
+            color: #666;
+        }
+        .layui-card {
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body class="layui-layout-body">
+    <div class="layui-layout layui-layout-admin">
+        <!-- 头部 -->
+        <div class="layui-header">
+            <div class="layui-logo">性能测试工具</div>
+        </div>
+
+        <!-- 左侧导航栏 -->
+        <div class="layui-side layui-bg-black">
+            <div class="layui-side-scroll">
+                <ul class="layui-nav layui-nav-tree">
+                    <li class="layui-nav-item">
+                        <a href="javascript:;" onclick="showTab('config')">配置</a>
+                    </li>
+                    <li class="layui-nav-item">
+                        <a href="javascript:;" onclick="showTab('report')">报告</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- 主体内容 -->
+        <div class="layui-body">
+            <!-- 配置部分 -->
+            <div id="configTab">
+                <div class="layui-tab layui-tab-brief">
+                    <ul class="layui-tab-title">
+                        <li class="layui-this">基础配置</li>
+                        <li>TCP组配置</li>
+                        <li>参数替换</li>
+                        <li>HTTP配置</li>
+                    </ul>
+                    <div class="layui-tab-content">
+                        <!-- 基础配置 -->
+                        <div class="layui-tab-item layui-show">
+                            <form class="layui-form">
+                                <div class="layui-form-item">
+                                    <label class="layui-form-label">运行时间(秒)</label>
+                                    <div class="layui-input-inline">
+                                        <input type="number" name="runtime" class="layui-input" value="30">
+                                    </div>
+                                </div>
+                                <div class="layui-form-item">
+                                    <label class="layui-form-label">调试模式</label>
+                                    <div class="layui-input-block">
+                                        <input type="checkbox" name="debug" lay-skin="switch" lay-text="开启|关闭">
+                                    </div>
+                                </div>
+                                <div class="layui-form-item">
+                                    <label class="layui-form-label">远程服务器</label>
+                                    <div class="layui-input-block">
+                                        <div id="remoteServerContainer">
+                                            <!-- 远程服务器配置 -->
+                                        </div>
+                                        <div style="margin-top: 10px;">
+                                            <button type="button" class="layui-btn layui-btn-sm" onclick="addRemoteServer()">
+                                                <i class="layui-icon">&#xe654;</i> 添加
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+
+                        <!-- TCP组配置 -->
+                        <div class="layui-tab-item">
+                            <div class="layui-btn-container">
+                                <button class="layui-btn layui-btn-sm" onclick="addTcpGroup()">
+                                    <i class="layui-icon">&#xe654;</i> 添加
+                                </button>
+                            </div>
+                            <div id="tcpGroupsContainer"></div>
+                        </div>
+
+                        <!-- 参数配置 -->
+                        <div class="layui-tab-item">
+                            <div class="layui-btn-container">
+                                <button class="layui-btn layui-btn-sm" onclick="addParam()">
+                                    <i class="layui-icon">&#xe654;</i> 添加
+                                </button>
+                            </div>
+                            <div id="paramsContainer"></div>
+                        </div>
+
+                        <!-- HTTP配置 -->
+                        <div class="layui-tab-item">
+                            <div class="layui-btn-container">
+                                <button class="layui-btn layui-btn-sm" onclick="addHttpConf()">
+                                    <i class="layui-icon">&#xe654;</i> 添加
+                                </button>
+                            </div>
+                            <div id="httpConfContainer"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 报告部分 -->
+            <div id="reportTab" style="display: none;">
+                <!-- 数据概览 -->
+                <div class="layui-row layui-col-space15 data-overview">
+                    <div class="layui-col-md3">
+                        <div class="data-card">
+                            <h2 id="currentQps">0</h2>
+                            <p>当前QPS</p>
+                        </div>
+                    </div>
+                    <div class="layui-col-md3">
+                        <div class="data-card">
+                            <h2 id="avgResponseTime">0ms</h2>
+                            <p>平均响应时间</p>
+                        </div>
+                    </div>
+                    <div class="layui-col-md3">
+                        <div class="data-card">
+                            <h2 id="successRate">100%</h2>
+                            <p>成功率</p>
+                        </div>
+                    </div>
+                    <div class="layui-col-md3">
+                        <div class="data-card">
+                            <h2 id="activeConns">0</h2>
+                            <p>活跃连接数</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 图表区域 -->
+                <div class="layui-row layui-col-space15">
+                    <div class="layui-col-md12">
+                        <div class="layui-card">
+                            <div class="layui-card-header">QPS趋势</div>
+                            <div class="layui-card-body">
+                                <div id="qpsChart" class="chart-container"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="layui-col-md6">
+                        <div class="layui-card">
+                            <div class="layui-card-header">响应时间分布</div>
+                            <div class="layui-card-body">
+                                <div id="responseTimeChart" class="chart-container"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="layui-col-md6">
+                        <div class="layui-card">
+                            <div class="layui-card-header">状态码分布</div>
+                            <div class="layui-card-body">
+                                <div id="statusCodeChart" class="chart-container"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 底部固定区域 -->
+        <div class="layui-footer">
+            <div class="layui-btn-container">
+                <button class="layui-btn" onclick="saveConfig()">保存配置</button>
+                <button class="layui-btn layui-btn-normal" onclick="startTest()">开始测试</button>
+                <button class="layui-btn layui-btn-danger" onclick="stopTest()">停止测试</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        layui.use(['element', 'form', 'layer'], function(){
+            var element = layui.element;
+            var form = layui.form;
+            var layer = layui.layer;
+            
+            // 初始化表单
+            form.render();
+        });
+
+        // 切换标签页
+        function showTab(tab) {
+            if (tab === 'config') {
+                document.getElementById('configTab').style.display = 'block';
+                document.getElementById('reportTab').style.display = 'none';
+            } else {
+                document.getElementById('configTab').style.display = 'none';
+                document.getElementById('reportTab').style.display = 'block';
+                initCharts();
+            }
+        }
+
+        // 添加TCP组
+        function addTcpGroup() {
+            const template = `
+                <div class="layui-card">
+                    <div class="layui-card-header">
+                        TCP组配置
+                        <button class="layui-btn layui-btn-danger layui-btn-xs" style="float:right" onclick="layui.$(this).parents('.layui-card').remove()">
+                            <i class="layui-icon">&#xe640;</i>
+                        </button>
+                    </div>
+                    <div class="layui-card-body">
+                        <form class="layui-form">
+                            <div class="layui-row layui-col-space10">
+                                <div class="layui-col-md6">
+                                    <div class="layui-form-item">
+                                        <label class="layui-form-label">组名</label>
+                                        <div class="layui-input-block">
+                                            <input type="text" class="layui-input" id="Name" placeholder="group1">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="layui-col-md6">
+                                    <div class="layui-form-item">
+                                        <label class="layui-form-label">目标地址</label>
+                                        <div class="layui-input-block">
+                                            <input type="text" class="layui-input" id="Dst" placeholder="2.0.0.67:80">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="layui-col-md6">
+                                    <div class="layui-form-item">
+                                        <label class="layui-form-label">源IP列表</label>
+                                        <div class="layui-input-block">
+                                            <textarea class="layui-textarea" id="SrcIP" placeholder="2.0.0.19,2.0.0.100"></textarea>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="layui-col-md6">
+                                    <div class="layui-form-item">
+                                        <label class="layui-form-label">HTTPS</label>
+                                        <div class="layui-input-block">
+                                            <input type="checkbox" lay-skin="switch" id="IsHttps" lay-text="是|否">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="layui-col-md6">
+                                    <div class="layui-form-item">
+                                        <label class="layui-form-label">连接数/IP</label>
+                                        <div class="layui-input-block">
+                                            <input type="number" class="layui-input" id="MaxTcpConnPerIP" value="10000">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="layui-col-md6">
+                                    <div class="layui-form-item">
+                                        <label class="layui-form-label">最大QPS</label>
+                                        <div class="layui-input-block">
+                                            <input type="number" class="layui-input" id="MaxQps" value="500">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="layui-col-md6">
+                                    <div class="layui-form-item">
+                                        <label class="layui-form-label">请求线程</label>
+                                        <div class="layui-input-block">
+                                            <input type="number" class="layui-input" id="ReqThread" value="500">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="layui-col-md6">
+                                    <div class="layui-form-item">
+                                        <label class="layui-form-label">请求数/TCP</label>
+                                        <div class="layui-input-block">
+                                            <input type="number" class="layui-input" id="MaxReqest" value="500">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="layui-col-md12">
+                                    <div class="layui-form-item">
+                                        <label class="layui-form-label">HTTP请求</label>
+                                        <div class="layui-input-block">
+                                            <input type="text" class="layui-input" id="SendHttp" placeholder="test1,test2">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+            document.getElementById('tcpGroupsContainer').insertAdjacentHTML('beforeend', template);
+            layui.form.render();
+        }
+
+        // 添加参数
+        function addParam() {
+            const template = `
+                <div class="layui-card">
+                    <div class="layui-card-header">
+                        参数配置
+                        <button class="layui-btn layui-btn-danger layui-btn-xs" style="float:right" onclick="layui.$(this).parents('.layui-card').remove()">
+                            <i class="layui-icon">&#xe640;</i>
+                        </button>
+                    </div>
+                    <div class="layui-card-body">
+                        <form class="layui-form">
+                            <div class="layui-row layui-col-space10">
+                                <div class="layui-col-md4">
+                                    <div class="layui-form-item">
+                                        <label class="layui-form-label">参数名</label>
+                                        <div class="layui-input-block">
+                                            <input type="text" class="layui-input" id="Name" placeholder="参数名">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="layui-col-md4">
+                                    <div class="layui-form-item">
+                                        <label class="layui-form-label">类型</label>
+                                        <div class="layui-input-block">
+                                            <select id="Type">
+                                                <option value="RandomInt">随机整数</option>
+                                                <option value="RandomStr">随机字符串</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="layui-col-md4">
+                                    <div class="layui-form-item">
+                                        <label class="layui-form-label">规格</label>
+                                        <div class="layui-input-block">
+                                            <input type="text" class="layui-input" id="Spec" placeholder="随机整数:1,10表示1~10中间随机">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+            document.getElementById('paramsContainer').insertAdjacentHTML('beforeend', template);
+            layui.form.render();
+        }
+
+        // 添加HTTP配置
+        function addHttpConf() {
+            const template = `
+                <div class="layui-card">
+                    <div class="layui-card-header">
+                        HTTP配置
+                        <button class="layui-btn layui-btn-danger layui-btn-xs" style="float:right" onclick="layui.$(this).parents('.layui-card').remove()">
+                            <i class="layui-icon">&#xe640;</i>
+                        </button>
+                    </div>
+                    <div class="layui-card-body">
+                        <form class="layui-form">
+                            <div class="layui-row layui-col-space10">
+                                <div class="layui-col-md4">
+                                    <div class="layui-form-item">
+                                        <label class="layui-form-label">名称</label>
+                                        <div class="layui-input-block">
+                                            <input type="text" class="layui-input" id="Name" placeholder="test1">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="layui-col-md4">
+                                    <div class="layui-form-item">
+                                        <label class="layui-form-label">协议</label>
+                                        <div class="layui-input-block">
+                                            <select id="Proto">
+                                                <option value="HTTP/1.1" selected>HTTP/1.1</option>
+                                                <option value="HTTP/1.0">HTTP/1.0</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="layui-col-md4">
+                                    <div class="layui-form-item">
+                                        <label class="layui-form-label">方法</label>
+                                        <div class="layui-input-block">
+                                            <select id="Method">
+                                                <option value="GET" selected>GET</option>
+                                                <option value="POST">POST</option>
+                                                <option value="PUT">PUT</option>
+                                                <option value="DELETE">DELETE</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="layui-col-md12">
+                                    <div class="layui-form-item">
+                                        <label class="layui-form-label">URI</label>
+                                        <div class="layui-input-block">
+                                            <input type="text" class="layui-input" id="URI" placeholder="/path?a=a">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="layui-col-md12">
+                                    <div class="layui-form-item">
+                                        <label class="layui-form-label">Headers</label>
+                                        <div class="layui-input-block">
+                                            <div class="headers-container">
+                                                <!-- Header 字段将被添加到这里 -->
+                                            </div>
+                                            <div style="margin-top: 10px;">
+                                                <button type="button" class="layui-btn layui-btn-sm" onclick="addHeaderField(this)">
+                                                    <i class="layui-icon">&#xe654;</i> 添加
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="layui-col-md12">
+                                    <div class="layui-form-item">
+                                        <label class="layui-form-label">Body</label>
+                                        <div class="layui-input-block">
+                                            <textarea class="layui-textarea" id="Body"></textarea>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="layui-col-md12">
+                                    <div class="layui-form-item">
+                                        <label class="layui-form-label">参数替换</label>
+                                        <div class="layui-input-block">
+                                            <input type="text" class="layui-input" id="UseParams" placeholder="aaa,bbb">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+            document.getElementById('httpConfContainer').insertAdjacentHTML('beforeend', template);
+            layui.form.render();
+        }
+
+        // 添加 Header 字段
+        function addHeaderField(button) {
+            const template = `
+                <div class="layui-form-item header-item">
+                    <div class="layui-inline" style="width: 40%;">
+                        <input type="text" class="layui-input" placeholder="Key">
+                    </div>
+                    <div class="layui-inline" style="width: 40%;">
+                        <input type="text" class="layui-input" placeholder="Value">
+                    </div>
+                    <div class="layui-inline" style="width: 10%;">
+                        <button type="button" class="layui-btn layui-btn-danger layui-btn-sm" onclick="this.parentElement.parentElement.remove()">
+                            <i class="layui-icon">&#xe640;</i>
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            // 找到最近的 headers-container 并添加新的 header 字段
+            const headersContainer = button.closest('.layui-form-item').querySelector('.headers-container');
+            headersContainer.insertAdjacentHTML('beforeend', template);
+            
+            // 重新渲染表单
+            layui.form.render();
+        }
+
+        // 初始化图表
+        function initCharts() {
+            // QPS趋势图
+            const qpsChart = echarts.init(document.getElementById('qpsChart'));
+            const qpsOption = {
+                title: {
+                    text: 'QPS趋势'
+                },
+                tooltip: {
+                    trigger: 'axis'
+                },
+                xAxis: {
+                    type: 'time',
+                    splitLine: {
+                        show: false
+                    }
+                },
+                yAxis: {
+                    type: 'value',
+                    splitLine: {
+                        show: true
+                    }
+                },
+                series: [{
+                    name: 'QPS',
+                    type: 'line',
+                    smooth: true,
+                    data: []
+                }]
+            };
+            qpsChart.setOption(qpsOption);
+
+            // 响应时间分布图
+            const responseTimeChart = echarts.init(document.getElementById('responseTimeChart'));
+            const responseTimeOption = {
+                title: {
+                    text: '响应时间分布'
+                },
+                tooltip: {
+                    trigger: 'axis'
+                },
+                xAxis: {
+                    type: 'category',
+                    data: ['0-100ms', '100-200ms', '200-500ms', '500ms-1s', '>1s']
+                },
+                yAxis: {
+                    type: 'value'
+                },
+                series: [{
+                    name: '请求数',
+                    type: 'bar',
+                    data: [0, 0, 0, 0, 0]
+                }]
+            };
+            responseTimeChart.setOption(responseTimeOption);
+
+            // 状态码分布图
+            const statusCodeChart = echarts.init(document.getElementById('statusCodeChart'));
+            const statusCodeOption = {
+                title: {
+                    text: '状态码分布'
+                },
+                tooltip: {
+                    trigger: 'item'
+                },
+                series: [{
+                    name: '状态码',
+                    type: 'pie',
+                    radius: '50%',
+                    data: [
+                        {value: 0, name: '200'},
+                        {value: 0, name: '4xx'},
+                        {value: 0, name: '5xx'}
+                    ]
+                }]
+            };
+            statusCodeChart.setOption(statusCodeOption);
+
+            // 自动调整图表大小
+            window.addEventListener('resize', function() {
+                qpsChart.resize();
+                responseTimeChart.resize();
+                statusCodeChart.resize();
+            });
+
+            // 模拟数据更新
+            setInterval(updateCharts, 1000);
+        }
+
+        // 更新图表数据
+        function updateCharts() {
+            document.getElementById('currentQps').innerText = Math.floor(Math.random() * 1000);
+            document.getElementById('avgResponseTime').innerText = Math.floor(Math.random() * 100) + 'ms';
+            document.getElementById('successRate').innerText = (95 + Math.random() * 5).toFixed(2) + '%';
+            document.getElementById('activeConns').innerText = Math.floor(Math.random() * 500);
+        }
+
+        // 获取所有配置
+        function getAllConfig() {
+            const config = {
+                RunTime: parseInt(document.querySelector('input[name="runtime"]').value),
+                Debug: document.querySelector('input[name="debug"]').checked,
+                RemoteServer: getRemoteServerConfig(),
+                TcpGroups: getTcpGroups(),
+                Params: getParams(),
+                HTTPconfs: getHttpConfs()
+            };
+            return config;
+        }
+
+        // 获取远程服务器配置
+        function getRemoteServerConfig() {
+            const remoteServer = {};
+            document.querySelectorAll('#remoteServerContainer .remote-server-item').forEach(item => {
+                const address = item.querySelector('input[placeholder="服务器地址:端口"]').value;
+                const groups = item.querySelector('input[placeholder="组名列表"]').value.split(',').map(g => g.trim());
+                if (address && groups.length > 0) {
+                    remoteServer[address] = groups;
+                }
+            });
+            return remoteServer;
+        }
+
+        // 获取TCP组配置
+        function getTcpGroups() {
+            const groups = [];
+            document.querySelectorAll('#tcpGroupsContainer .layui-card').forEach(card => {
+                const group = {
+                    Name: card.querySelector('input[id="Name"]').value,
+                    MaxTcpConnPerIP: parseInt(card.querySelector('input[id="MaxTcpConnPerIP"]').value),
+                    SrcIP: card.querySelector('textarea[id="SrcIP"]').value.split(','),
+                    MaxQps: parseInt(card.querySelector('input[id="MaxQps"]').value),
+                    Dst: card.querySelector('input[id="Dst"]').value,
+                    IsHttps: card.querySelector('input[id="IsHttps"]').checked,
+                    SendHttp: card.querySelector('input[id="SendHttp"]').value.split(',')
+                };
+                groups.push(group);
+            });
+            return groups;
+        }
+
+        // 获取参数配置
+        function getParams() {
+            const params = [];
+            document.querySelectorAll('#paramsContainer .layui-card').forEach(card => {
+                const param = {
+                    Name: card.querySelector('input[id="Name"]').value,
+                    Type: card.querySelector('select[id="Type"]').value,
+                    Spec: card.querySelector('input[id="Spec"]').value.split(',')
+                };
+                params.push(param);
+            });
+            return params;
+        }
+
+        // 获取HTTP配置
+        function getHttpConfs() {
+            const confs = [];
+            document.querySelectorAll('#httpConfContainer .layui-card').forEach(card => {
+                const conf = {
+                    Name: card.querySelector('input[id="Name"]').value,
+                    Proto: card.querySelector('select[id="Proto"]').value,
+                    Method: card.querySelector('select[id="Method"]').value,
+                    URI: card.querySelector('input[id="URI"]').value,
+                    Header: (() => {
+                        const headers = {};
+                        card.querySelectorAll('.header-item').forEach(item => {
+                            const key = item.querySelector('input[placeholder="Key"]').value;
+                            const value = item.querySelector('input[placeholder="Value"]').value;
+                            if (key) headers[key] = value;
+                        });
+                        return headers;
+                    })(),
+                    Body: card.querySelector('textarea[id="Body"]').value,
+                    UseParams:  card.querySelector('input[id="UseParams"]').value.split(',')
+                };
+                confs.push(conf);
+            });
+            return confs;
+        }
+
+        // 修改保存配置函数
+        function saveConfig() {
+            const config = getAllConfig();
+            // 发送配置到后端
+            fetch('/api/config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(config)
+            })
+            .then(response => response.json())
+            .then(data => {
+                layui.layer.msg('配置已保存');
+            })
+            .catch(error => {
+                layui.layer.msg('保存失败：' + error.message);
+            });
+        }
+
+        // 修改开始测试函数
+        function startTest() {
+            const config = getAllConfig();
+            // 发送开始测试请求到后端
+            fetch('/api/test/start', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(config)
+            })
+            .then(response => response.json())
+            .then(data => {
+                showTab('report');
+                layui.layer.msg('测试已开始');
+                // 开始WebSocket连接获取实时数据
+                startWebSocket();
+            })
+            .catch(error => {
+                layui.layer.msg('启动失败：' + error.message);
+            });
+        }
+
+        // 修改停止测试函数
+        function stopTest() {
+            fetch('/api/test/stop', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                layui.layer.msg('测试已停止');
+                // 关闭WebSocket连接
+                stopWebSocket();
+            })
+            .catch(error => {
+                layui.layer.msg('停止失败：' + error.message);
+            });
+        }
+
+        // WebSocket连接
+        let ws;
+
+        function startWebSocket() {
+            ws = new WebSocket('ws://' + window.location.host + '/ws');
+            
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                updateReportData(data);
+            };
+
+            ws.onclose = function() {
+                console.log('WebSocket连接已关闭');
+            };
+
+            ws.onerror = function(error) {
+                console.error('WebSocket错误：', error);
+                layui.layer.msg('实时数据连接失败');
+            };
+        }
+
+        function stopWebSocket() {
+            if (ws) {
+                ws.close();
+            }
+        }
+
+        // 更新报告数据
+        function updateReportData(data) {
+            // 更新概览数据
+            document.getElementById('currentQps').innerText = data.qps;
+            document.getElementById('avgResponseTime').innerText = data.avgResponseTime + 'ms';
+            document.getElementById('successRate').innerText = data.successRate + '%';
+            document.getElementById('activeConns').innerText = data.activeConns;
+
+            // 更新图表数据
+            updateCharts(data);
+        }
+
+        // 修改更新图表函数
+        function updateCharts(data) {
+            const qpsChart = echarts.getInstanceByDom(document.getElementById('qpsChart'));
+            const responseTimeChart = echarts.getInstanceByDom(document.getElementById('responseTimeChart'));
+            const statusCodeChart = echarts.getInstanceByDom(document.getElementById('statusCodeChart'));
+
+            if (qpsChart && data.qpsData) {
+                qpsChart.setOption({
+                    series: [{
+                        data: data.qpsData
+                    }]
+                });
+            }
+
+            if (responseTimeChart && data.responseTimeData) {
+                responseTimeChart.setOption({
+                    series: [{
+                        data: data.responseTimeData
+                    }]
+                });
+            }
+
+            if (statusCodeChart && data.statusCodeData) {
+                statusCodeChart.setOption({
+                    series: [{
+                        data: data.statusCodeData
+                    }]
+                });
+            }
+        }
+
+        // 添加远程服务器配置
+        function addRemoteServer() {
+            const template = `
+                <div class="layui-form-item remote-server-item">
+                    <div class="layui-inline" style="width: 40%;">
+                        <input type="text" class="layui-input" placeholder="服务器地址:端口">
+                    </div>
+                    <div class="layui-inline" style="width: 40%;">
+                        <input type="text" class="layui-input" placeholder="组名列表">
+                    </div>
+                    <div class="layui-inline" style="width: 10%;">
+                        <button type="button" class="layui-btn layui-btn-danger layui-btn-sm" onclick="this.parentElement.parentElement.remove()">
+                            <i class="layui-icon">&#xe640;</i>
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            // 找到远程服务器容器并添加新的服务器配置
+            const container = document.getElementById('remoteServerContainer');
+            container.insertAdjacentHTML('beforeend', template);
+            
+            // 重新渲染表单
+            layui.form.render();
+        }
+    </script>
+</body>
+</html>

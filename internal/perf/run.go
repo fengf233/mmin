@@ -3,6 +3,7 @@ package perf
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -24,12 +25,12 @@ const (
 
 // RunConf 运行配置
 type RunConf struct {
-	RunTime      int                 `yaml:"RunTime"`
-	Debug        bool                `yaml:"Debug"`
-	RemoteServer map[string][]string `yaml:"RemoteServer"`
-	ParamsConfs  []*ParamsConf       `yaml:"Params"`
-	TcpGroups    []*TcpGroup         `yaml:"TcpGroups"`
-	HTTPconfs    []*HTTPconf         `yaml:"HTTPConfs"`
+	RunTime      int                 `yaml:"RunTime" json:"RunTime"`
+	Debug        bool                `yaml:"Debug" json:"Debug"`
+	RemoteServer map[string][]string `yaml:"RemoteServer" json:"RemoteServer"`
+	ParamsConfs  []*ParamsConf       `yaml:"Params" json:"Params"`
+	TcpGroups    []*TcpGroup         `yaml:"TcpGroups" json:"TcpGroups"`
+	HTTPconfs    []*HTTPconf         `yaml:"HTTPConfs" json:"HTTPConfs"`
 	ctx          *RunCtx
 	report       *Report
 }
@@ -47,17 +48,20 @@ func ReadRunConfByFile(filename string) (*RunConf, error) {
 	if err != nil {
 		return nil, err
 	}
-	var rc RunConf
-	err = yaml.Unmarshal(buf, &rc)
-	if err != nil {
-		return nil, err
-	}
-	return &rc, nil
+	return ReadRunConfByByte(buf)
 }
 
 func ReadRunConfByByte(body []byte) (*RunConf, error) {
 	var rc RunConf
-	err := yaml.Unmarshal(body, &rc)
+
+	// Try JSON first
+	err := json.Unmarshal(body, &rc)
+	if err == nil {
+		return &rc, nil
+	}
+
+	// Fall back to YAML if JSON fails
+	err = yaml.Unmarshal(body, &rc)
 	if err != nil {
 		return nil, err
 	}
