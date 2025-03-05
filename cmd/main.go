@@ -39,7 +39,8 @@ func (f *strListFlag) Set(value string) error {
 // Config 命令行配置
 type Config struct {
 	confName   string
-	isServer   bool
+	isRemote   bool
+	isWeb      bool
 	serverPort string
 	urlStr     string
 	reqThread  int
@@ -55,18 +56,19 @@ type Config struct {
 func parseFlags() *Config {
 	cfg := &Config{}
 
-	flag.StringVar(&cfg.confName, "conf", "", "指定运行的yaml文件,其他选项会失效,优先执行yaml文件")
-	flag.BoolVar(&cfg.isServer, "S", false, "以服务端的方式运行,-P指定监听端口")
-	flag.StringVar(&cfg.serverPort, "P", defaultPort, "-S下生效,指定监听端口")
-	flag.StringVar(&cfg.urlStr, "u", "", "URL地址:http://test.com:8080/test")
-	flag.IntVar(&cfg.reqThread, "c", defaultThreads, "请求线程数,默认100")
-	flag.IntVar(&cfg.runTime, "t", defaultRunTime, "运行时间,默认10s")
-	flag.IntVar(&cfg.rps, "R", 0, "限制RPS发送请求速率,默认不限制")
-	flag.StringVar(&cfg.postBody, "data", "", "发送body:-data 'a=1&b=2'")
-	flag.StringVar(&cfg.method, "m", defaultMethod, "请求方法")
-	flag.IntVar(&cfg.maxRequest, "k", defaultMaxReq, "设置每个TCP最多发送多少请求,默认100")
-	flag.BoolVar(&cfg.debug, "debug", false, "是否打开打印调试信息")
-	flag.Var(&cfg.headers, "H", "自定义头:-H 'Content-Type: application/json'")
+	flag.StringVar(&cfg.confName, "conf", "", "配置文件路径 (yaml,json格式)")
+	flag.BoolVar(&cfg.isRemote, "S", false, "作为远程节点")
+	flag.BoolVar(&cfg.isWeb, "web", false, "启动web服务")
+	flag.StringVar(&cfg.serverPort, "p", defaultPort, "服务器监听端口")
+	flag.StringVar(&cfg.urlStr, "u", "", "目标URL (例如: http://example.com:8080/path)")
+	flag.IntVar(&cfg.reqThread, "c", defaultThreads, "并发线程数")
+	flag.IntVar(&cfg.runTime, "t", defaultRunTime, "运行时间(秒)")
+	flag.IntVar(&cfg.rps, "r", 0, "每秒请求数限制(0表示不限制)")
+	flag.StringVar(&cfg.postBody, "d", "", "POST请求体数据")
+	flag.StringVar(&cfg.method, "X", defaultMethod, "HTTP请求方法")
+	flag.IntVar(&cfg.maxRequest, "k", defaultMaxReq, "单个TCP连接最大请求数")
+	flag.BoolVar(&cfg.debug, "v", false, "显示详细调试信息")
+	flag.Var(&cfg.headers, "H", "自定义HTTP头 (可重复使用)")
 
 	flag.Parse()
 	return cfg
@@ -75,10 +77,15 @@ func parseFlags() *Config {
 func main() {
 	cfg := parseFlags()
 
-	if cfg.isServer {
-		if err := server.Start(cfg.serverPort); err != nil {
+	if cfg.isRemote {
+		if err := server.StartRemoteServer(cfg.serverPort); err != nil {
 			log.Fatalf("Server failed to start: %v", err)
 		}
+		return
+	}
+
+	if cfg.isWeb {
+		server.StartWebServer(cfg.serverPort)
 		return
 	}
 

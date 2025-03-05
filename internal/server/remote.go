@@ -18,16 +18,16 @@ const (
 	serverError    = "Error"
 )
 
-type Server struct {
+type RemoteServer struct {
 	isRunning int32
 	report    *perf.Report
 }
 
-func NewServer() *Server {
-	return &Server{}
+func NewRemoteServer() *RemoteServer {
+	return &RemoteServer{}
 }
 
-func (s *Server) runHandler(w http.ResponseWriter, r *http.Request) {
+func (s *RemoteServer) runHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -63,7 +63,7 @@ func (s *Server) runHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("Running configuration:\n%s\n", body)
 }
 
-func (s *Server) reportHandler(w http.ResponseWriter, r *http.Request) {
+func (s *RemoteServer) reportHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -90,8 +90,8 @@ func (s *Server) reportHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(yamlData)
 }
 
-func Start(port string) error {
-	server := NewServer()
+func StartRemoteServer(port string) error {
+	server := NewRemoteServer()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/run", server.runHandler)
@@ -102,6 +102,6 @@ func Start(port string) error {
 		Handler: mux,
 	}
 
-	fmt.Printf("Server starting on port %s\n", port)
+	fmt.Printf("Remote server starting on port %s\n", port)
 	return srv.ListenAndServe()
 }

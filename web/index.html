@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <title>性能测试工具</title>
-    <link rel="stylesheet" href="static/layui/css/layui.css">
-    <script src="static/layui/layui.js"></script>
-    <script src="static/echarts.min.js"></script>
+    <link rel="stylesheet" href="/static/layui/css/layui.css">
+    <script src="/static/layui/layui.js"></script>
+    <script src="/static/echarts.min.js"></script>
     <style>
         .layui-layout-admin .layui-body {
             padding: 15px;
@@ -198,21 +198,47 @@
         <div class="layui-footer">
             <div class="layui-btn-container">
                 <button class="layui-btn" onclick="saveConfig()">保存配置</button>
+                <button class="layui-btn layui-btn-warning layui-bg-orange" onclick="importConfig()">导入配置</button>
                 <button class="layui-btn layui-btn-normal" onclick="startTest()">开始测试</button>
-                <button class="layui-btn layui-btn-danger" onclick="stopTest()">停止测试</button>
+                <button class="layui-btn layui-btn-danger layui-btn-disabled" onclick="stopTest()" disabled>停止测试</button>
             </div>
         </div>
     </div>
 
+    <!-- 添加隐藏的文件输入 -->
+    <input type="file" id="configFileInput" style="display: none" accept=".json,.yaml" onchange="handleConfigFile(this)">
+
     <script>
+        // 添加测试状态变量
+        let isTestRunning = false;
+
         layui.use(['element', 'form', 'layer'], function(){
             var element = layui.element;
             var form = layui.form;
             var layer = layui.layer;
             
-            // 初始化表单
+            // 初始化表单和按钮状态
             form.render();
+            updateButtonStates();
         });
+
+        // 添加按钮状态更新函数
+        function updateButtonStates() {
+            const startBtn = document.querySelector('button[onclick="startTest()"]');
+            const stopBtn = document.querySelector('button[onclick="stopTest()"]');
+            
+            if (isTestRunning) {
+                startBtn.classList.add('layui-btn-disabled');
+                startBtn.disabled = true;
+                stopBtn.classList.remove('layui-btn-disabled');
+                stopBtn.disabled = false;
+            } else {
+                startBtn.classList.remove('layui-btn-disabled');
+                startBtn.disabled = false;
+                stopBtn.classList.add('layui-btn-disabled');
+                stopBtn.disabled = true;
+            }
+        }
 
         // 切换标签页
         function showTab(tab) {
@@ -275,7 +301,7 @@
                                     <div class="layui-form-item">
                                         <label class="layui-form-label">连接数/IP</label>
                                         <div class="layui-input-block">
-                                            <input type="number" class="layui-input" id="MaxTcpConnPerIP" value="10000">
+                                            <input type="number" class="layui-input" id="MaxTcpConnPerIP" value="1000">
                                         </div>
                                     </div>
                                 </div>
@@ -299,7 +325,7 @@
                                     <div class="layui-form-item">
                                         <label class="layui-form-label">请求数/TCP</label>
                                         <div class="layui-input-block">
-                                            <input type="number" class="layui-input" id="MaxReqest" value="500">
+                                            <input type="number" class="layui-input" id="MaxReqest" value="100">
                                         </div>
                                     </div>
                                 </div>
@@ -307,7 +333,7 @@
                                     <div class="layui-form-item">
                                         <label class="layui-form-label">HTTP请求</label>
                                         <div class="layui-input-block">
-                                            <input type="text" class="layui-input" id="SendHttp" placeholder="test1,test2">
+                                            <input type="text" class="layui-input" id="SendHttp" placeholder="http1,http2">
                                         </div>
                                     </div>
                                 </div>
@@ -622,7 +648,9 @@
                     MaxQps: parseInt(card.querySelector('input[id="MaxQps"]').value),
                     Dst: card.querySelector('input[id="Dst"]').value,
                     IsHttps: card.querySelector('input[id="IsHttps"]').checked,
-                    SendHttp: card.querySelector('input[id="SendHttp"]').value.split(',')
+                    SendHttp: card.querySelector('input[id="SendHttp"]').value.split(','),
+                    ReqThread: parseInt(card.querySelector('input[id="ReqThread"]').value),
+                    MaxReqest: parseInt(card.querySelector('input[id="MaxReqest"]').value)
                 };
                 groups.push(group);
             });
@@ -672,27 +700,24 @@
         // 修改保存配置函数
         function saveConfig() {
             const config = getAllConfig();
-            // 发送配置到后端
-            fetch('/api/config', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(config)
-            })
-            .then(response => response.json())
-            .then(data => {
-                layui.layer.msg('配置已保存');
-            })
-            .catch(error => {
-                layui.layer.msg('保存失败：' + error.message);
-            });
+            const jsonStr = JSON.stringify(config, null, 2);
+            const blob = new Blob([jsonStr], { type: 'application/json' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'config.json';
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            layui.layer.msg('配置已下载');
         }
 
         // 修改开始测试函数
         function startTest() {
+            if (isTestRunning) return;
+
             const config = getAllConfig();
-            // 发送开始测试请求到后端
             fetch('/api/test/start', {
                 method: 'POST',
                 headers: {
@@ -704,7 +729,8 @@
             .then(data => {
                 showTab('report');
                 layui.layer.msg('测试已开始');
-                // 开始WebSocket连接获取实时数据
+                isTestRunning = true;
+                updateButtonStates();
                 startWebSocket();
             })
             .catch(error => {
@@ -714,13 +740,16 @@
 
         // 修改停止测试函数
         function stopTest() {
+            if (!isTestRunning) return;
+
             fetch('/api/test/stop', {
                 method: 'POST'
             })
             .then(response => response.json())
             .then(data => {
                 layui.layer.msg('测试已停止');
-                // 关闭WebSocket连接
+                isTestRunning = false;
+                updateButtonStates();
                 stopWebSocket();
             })
             .catch(error => {
@@ -741,11 +770,15 @@
 
             ws.onclose = function() {
                 console.log('WebSocket连接已关闭');
+                isTestRunning = false;
+                updateButtonStates();
             };
 
             ws.onerror = function(error) {
                 console.error('WebSocket错误：', error);
                 layui.layer.msg('实时数据连接失败');
+                isTestRunning = false;
+                updateButtonStates();
             };
         }
 
@@ -822,6 +855,105 @@
             
             // 重新渲染表单
             layui.form.render();
+        }
+
+        function importConfig() {
+            document.getElementById('configFileInput').click();
+        }
+
+        function handleConfigFile(input) {
+            const file = input.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const config = JSON.parse(e.target.result);
+                    applyConfig(config);
+                    layui.layer.msg('配置导入成功');
+                } catch (err) {
+                    layui.layer.msg('配置格式错误：' + err.message);
+                }
+            };
+            reader.readAsText(file);
+            input.value = ''; // 清除文件选择，允许重复选择同一文件
+        }
+
+        function applyConfig(config) {
+            // 清除现有配置
+            document.getElementById('remoteServerContainer').innerHTML = '';
+            document.getElementById('tcpGroupsContainer').innerHTML = '';
+            document.getElementById('paramsContainer').innerHTML = '';
+            document.getElementById('httpConfContainer').innerHTML = '';
+
+            // 设置基础配置
+            document.querySelector('input[name="runtime"]').value = config.RunTime || 30;
+            document.querySelector('input[name="debug"]').checked = config.Debug || false;
+
+            // 添加远程服务器配置
+            if (config.RemoteServer) {
+                for (const [address, groups] of Object.entries(config.RemoteServer)) {
+                    addRemoteServer();
+                    const item = document.querySelector('#remoteServerContainer .remote-server-item:last-child');
+                    item.querySelector('input[placeholder="服务器地址:端口"]').value = address;
+                    item.querySelector('input[placeholder="组名列表"]').value = groups.join(',');
+                }
+            }
+
+            // 添加TCP组配置
+            if (config.TcpGroups) {
+                config.TcpGroups.forEach(group => {
+                    addTcpGroup();
+                    const card = document.querySelector('#tcpGroupsContainer .layui-card:last-child');
+                    card.querySelector('input[id="Name"]').value = group.Name || '';
+                    card.querySelector('input[id="MaxTcpConnPerIP"]').value = group.MaxTcpConnPerIP || 1000;
+                    card.querySelector('textarea[id="SrcIP"]').value = (group.SrcIP || []).join(',');
+                    card.querySelector('input[id="MaxQps"]').value = group.MaxQPS || 0;
+                    card.querySelector('input[id="Dst"]').value = group.Dst || '';
+                    card.querySelector('input[id="ReqThread"]').value = group.ReqThread || 100;
+                    card.querySelector('input[id="MaxReqest"]').value = group.MaxReqest || 100;
+                    card.querySelector('input[id="IsHttps"]').checked = group.IsHttps || false;
+                    card.querySelector('input[id="SendHttp"]').value = (group.SendHttp || []).join(',');
+                });
+            }
+
+            // 添加参数配置
+            if (config.Params) {
+                config.Params.forEach(param => {
+                    addParam();
+                    const card = document.querySelector('#paramsContainer .layui-card:last-child');
+                    card.querySelector('input[id="Name"]').value = param.Name || '';
+                    card.querySelector('select[id="Type"]').value = param.Type || 'RandomInt';
+                    card.querySelector('input[id="Spec"]').value = (param.Spec || []).join(',');
+                });
+            }
+
+            // 添加HTTP配置
+            if (config.HTTPconfs) {
+                config.HTTPconfs.forEach(conf => {
+                    addHttpConf();
+                    const card = document.querySelector('#httpConfContainer .layui-card:last-child');
+                    card.querySelector('input[id="Name"]').value = conf.Name || '';
+                    card.querySelector('select[id="Proto"]').value = conf.Proto || 'HTTP/1.1';
+                    card.querySelector('select[id="Method"]').value = conf.Method || 'GET';
+                    card.querySelector('input[id="URI"]').value = conf.URI || '';
+                    
+                    // 设置Headers
+                    if (conf.Header) {
+                        for (const [key, value] of Object.entries(conf.Header)) {
+                            addHeaderField(card.querySelector('button[onclick="addHeaderField(this)"]'));
+                            const headerItem = card.querySelector('.headers-container .header-item:last-child');
+                            headerItem.querySelector('input[placeholder="Key"]').value = key;
+                            headerItem.querySelector('input[placeholder="Value"]').value = value;
+                        }
+                    }
+                    
+                    card.querySelector('textarea[id="Body"]').value = conf.Body || '';
+                    card.querySelector('input[id="UseParams"]').value = (conf.UseParams || []).join(',');
+                });
+            }
+
+            layui.form.render(); // 重新渲染所有表单
         }
     </script>
 </body>

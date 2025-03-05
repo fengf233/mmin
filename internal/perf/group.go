@@ -73,7 +73,9 @@ func (tg *TcpGroup) Init(ctx *RunCtx, r *Report, reqMap map[string]*HTTPconf) {
 			tg.sendHttpConfs = append(tg.sendHttpConfs, httpConf)
 		}
 	}
-	tg.rl = rate.NewLimiter(rate.Limit(tg.MaxQPS), 1)
+	if tg.MaxQPS > 0 {
+		tg.rl = rate.NewLimiter(rate.Limit(tg.MaxQPS), 1)
+	}
 	tg.ctx = ctx
 	tg.r = r
 }
@@ -124,8 +126,10 @@ func (tg *TcpGroup) task() {
 			return
 		default:
 			if reqCount < tg.MaxReqest {
-				if err := tg.rl.Wait(tg.ctx.ctx); err != nil {
-					continue
+				if tg.rl != nil {
+					if err := tg.rl.Wait(tg.ctx.ctx); err != nil {
+						continue
+					}
 				}
 
 				sendHttpBytes := tg.sendHttpConfs[reqCount%httpConfCount].GetReqBytes()

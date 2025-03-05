@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -33,6 +34,7 @@ type RunConf struct {
 	HTTPconfs    []*HTTPconf         `yaml:"HTTPConfs" json:"HTTPConfs"`
 	ctx          *RunCtx
 	report       *Report
+	running      int32 // 添加运行状态标志
 }
 
 // RunCtx 运行上下文
@@ -112,9 +114,23 @@ func (rc *RunConf) calculateMaxResult() int {
 	return maxResult
 }
 
+// Stop 停止测试运行
+func (rc *RunConf) Stop() {
+	if atomic.CompareAndSwapInt32(&rc.running, 1, 0) {
+		rc.shutdown()
+	}
+}
+
 func (rc *RunConf) Run() *Report {
+	// 设置运行状态
+	if !atomic.CompareAndSwapInt32(&rc.running, 0, 1) {
+		fmt.Println("Test is already running")
+		return nil
+	}
+
 	if len(rc.RemoteServer) != 0 {
 		rc.RemoteRun()
+		atomic.StoreInt32(&rc.running, 0)
 		return nil
 	}
 
@@ -122,6 +138,7 @@ func (rc *RunConf) Run() *Report {
 	_, _ = maxprocs.Set()
 	if err := rc.init(); err != nil {
 		fmt.Printf("初始化失败: %v\n", err)
+		atomic.StoreInt32(&rc.running, 0)
 		return nil
 	}
 
@@ -146,6 +163,7 @@ func (rc *RunConf) Run() *Report {
 	}
 	rc.ctx.wg.Wait()
 
+	atomic.StoreInt32(&rc.running, 0)
 	return rc.report
 }
 
@@ -238,7 +256,7 @@ func (rc *RunConf) timer() {
 			rc.shutdown()
 			return
 		default:
-			if rc.shouldStop() {
+			if !rc.isRunning() || rc.shouldStop() {
 				rc.shutdown()
 				return
 			}
@@ -253,11 +271,25 @@ func (rc *RunConf) shouldStop() bool {
 	return time.Since(rc.report.StartTime).Seconds() > float64(rc.RunTime)
 }
 
+// isRunning 检查测试是否正在运行
+func (rc *RunConf) isRunning() bool {
+	return atomic.LoadInt32(&rc.running) == 1
+}
+
 func (rc *RunConf) shutdown() {
+	// 先调用 cancel 通知所有 goroutine 停止
 	rc.ctx.cancel()
+
+	// 使用 WaitGroup 等待所有连接处理完成
+	var wg sync.WaitGroup
 	for _, tg := range rc.TcpGroups {
-		if tg.pool != nil {
-			tg.pool.Close()
+		if tg.pool != nil && !tg.pool.IsClosed() {
+			wg.Add(1)
+			go func(pool *ConnPool) {
+				defer wg.Done()
+				pool.Close()
+			}(tg.pool)
 		}
 	}
+	wg.Wait()
 }

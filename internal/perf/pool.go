@@ -70,6 +70,10 @@ type ConnPool struct {
 		failed  int32
 		created int32
 	}
+
+	closed    int32         // 添加关闭状态标志
+	closeCh   chan struct{} // 用于通知关闭的channel
+	closeOnce sync.Once     // 确保只关闭一次
 }
 
 // 创建连接池
@@ -83,7 +87,10 @@ func NewConnPool(dst string, srcIP []string, maxConnPerIP int, creatThread int, 
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: true, // 跳过证书验证
 	}
-	rl := rate.NewLimiter(rate.Limit(creatRate), 1)
+	var rl *rate.Limiter = nil
+	if creatRate > 0 {
+		rl = rate.NewLimiter(rate.Limit(creatRate), 1)
+	}
 
 	pool := &ConnPool{
 		dst:          dst,
@@ -103,6 +110,9 @@ func NewConnPool(dst string, srcIP []string, maxConnPerIP int, creatThread int, 
 		tlsConfig:   tlsConfig,
 		connsChan:   connsChan,
 		factoryChan: factoryChan,
+		closed:      0,
+		closeCh:     make(chan struct{}),
+		closeOnce:   sync.Once{},
 	}
 	pool.init()
 	return pool
@@ -194,8 +204,10 @@ func (pool *ConnPool) creat(srcip string, maxConnPerIP int) {
 	}
 
 	for created := 0; created < maxConnPerIP; created++ {
-		if err := pool.rl.Wait(pool.ctx); err != nil {
-			return // context cancelled
+		if pool.rl != nil {
+			if err := pool.rl.Wait(pool.ctx); err != nil {
+				return // context cancelled
+			}
 		}
 
 		conn, err := pool.getConn(dialer)
@@ -330,25 +342,28 @@ func (pool *ConnPool) Len() int {
 
 // 关闭连接池
 func (pool *ConnPool) Close() {
-	pool.cancel()
-	close(pool.connsChan)
-	close(pool.factoryChan)
+	pool.closeOnce.Do(func() {
+		atomic.StoreInt32(&pool.closed, 1)
 
-	// Close all connections in connsChan
-	for conn := range pool.connsChan {
-		conn.Close()
-		atomic.AddInt32(&pool.stats.active, -1)
-		if len(pool.connsChan) == 0 {
-			break
-		}
-	}
+		// 先取消上下文
+		pool.cancel()
 
-	// Close all connections in factoryChan
-	for conn := range pool.factoryChan {
-		conn.Close()
-		atomic.AddInt32(&pool.stats.active, -1)
-		if len(pool.factoryChan) == 0 {
-			break
+		// 关闭通知channel
+		close(pool.closeCh)
+
+		// 关闭连接相关channel
+		close(pool.connsChan)
+		close(pool.factoryChan)
+
+		// 关闭所有连接
+		for conn := range pool.connsChan {
+			if conn != nil {
+				conn.Close()
+			}
 		}
-	}
+	})
+}
+
+func (p *ConnPool) IsClosed() bool {
+	return atomic.LoadInt32(&p.closed) == 1
 }
