@@ -20,7 +20,7 @@ const (
 
 type RemoteServer struct {
 	isRunning int32
-	report    *perf.Report
+	runConf   *perf.RunConf
 }
 
 func NewRemoteServer() *RemoteServer {
@@ -53,10 +53,11 @@ func (s *RemoteServer) runHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.runConf = runConf
 	atomic.StoreInt32(&s.isRunning, 1)
 	go func() {
 		defer atomic.StoreInt32(&s.isRunning, 0)
-		s.report = runConf.Run()
+		runConf.Run()
 	}()
 
 	fmt.Fprint(w, serverStarted)
@@ -74,12 +75,12 @@ func (s *RemoteServer) reportHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.report == nil {
+	if s.runConf.Report == nil {
 		http.Error(w, "No report available", http.StatusNotFound)
 		return
 	}
 
-	yamlData, err := yaml.Marshal(s.report)
+	yamlData, err := yaml.Marshal(s.runConf.Report)
 	if err != nil {
 		http.Error(w, serverError, http.StatusInternalServerError)
 		fmt.Printf("Error marshaling report: %v\n", err)

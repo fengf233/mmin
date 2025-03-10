@@ -33,6 +33,7 @@ type Report struct {
 	StartTime     time.Time      `yaml:"start_time" json:"start_time"`
 	Respcode      map[int]int    `yaml:"respcode" json:"respcode"`
 	ErrMap        map[string]int `yaml:"errMap" json:"errMap"`
+	RunTime       float64        `yaml:"runTime" json:"runTime"` //运行时间
 	maxResultChan chan *ReqResult
 	rwlock        *sync.RWMutex
 	ctx           *RunCtx
@@ -107,7 +108,7 @@ func (r *Report) Printer() {
 			r.updateStats(result)
 
 			if result.start.Sub(lastPrintTime) >= printInterval {
-				r.printProgress(rowFormat, result.start)
+				r.printProgress(rowFormat)
 				lastPrintTime = result.start
 			}
 		default:
@@ -148,13 +149,14 @@ func (r *Report) updateStats(result *ReqResult) {
 	r.ReqTime += float64(result.reqtime) / 1e6
 	r.AllReqTime += float64(result.reqtime) / 1e6
 	r.est.Insert(float64(result.reqtime) / 1e6)
+	r.RunTime = result.start.Sub(r.StartTime).Seconds()
 	r.rwlock.Unlock()
 }
 
-func (r *Report) printProgress(format string, now time.Time) {
+func (r *Report) printProgress(format string) {
 	receive := atomic.LoadInt64(&r.Receive)
 	send := atomic.LoadInt64(&r.Send)
-	runtime := now.Sub(r.StartTime).Seconds()
+	runtime := r.RunTime
 
 	r.rwlock.RLock()
 	status := r.formatStatus()
@@ -198,7 +200,7 @@ func (r *Report) printFinalReport() {
 	sumTab := r.createSumTable()
 	sumFormat := sumTab.Print("*")
 
-	runtime := time.Now().Sub(r.StartTime).Seconds()
+	runtime := r.RunTime
 	r.AvgRate = float32(float64(r.Success) / runtime)
 	r.AvgReceive = float32(float64(r.Receive) * 8.0 / 1000.0 / 1000.0 / runtime)
 	r.AvgSend = float32(float64(r.Send) * 8.0 / 1000.0 / 1000.0 / runtime)

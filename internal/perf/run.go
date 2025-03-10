@@ -33,7 +33,7 @@ type RunConf struct {
 	TcpGroups    []*TcpGroup         `yaml:"TcpGroups" json:"TcpGroups"`
 	HTTPconfs    []*HTTPconf         `yaml:"HTTPConfs" json:"HTTPConfs"`
 	ctx          *RunCtx
-	report       *Report
+	Report       *Report
 	running      int32 // 添加运行状态标志
 }
 
@@ -93,7 +93,7 @@ func (rc *RunConf) init() error {
 	// 计算最大结果数
 	maxResult := rc.calculateMaxResult()
 	report := NewReport(ctx, maxResult)
-	rc.report = report
+	rc.Report = report
 
 	// 初始化TCP组
 	for _, tg := range rc.TcpGroups {
@@ -121,17 +121,17 @@ func (rc *RunConf) Stop() {
 	}
 }
 
-func (rc *RunConf) Run() *Report {
+func (rc *RunConf) Run() {
 	// 设置运行状态
 	if !atomic.CompareAndSwapInt32(&rc.running, 0, 1) {
 		fmt.Println("Test is already running")
-		return nil
+		return
 	}
 
 	if len(rc.RemoteServer) != 0 {
 		rc.RemoteRun()
 		atomic.StoreInt32(&rc.running, 0)
-		return nil
+		return
 	}
 
 	// 初始化
@@ -139,7 +139,7 @@ func (rc *RunConf) Run() *Report {
 	if err := rc.init(); err != nil {
 		fmt.Printf("初始化失败: %v\n", err)
 		atomic.StoreInt32(&rc.running, 0)
-		return nil
+		return
 	}
 
 	// 启动连接池
@@ -154,7 +154,7 @@ func (rc *RunConf) Run() *Report {
 
 	// 启动测试
 	rc.ctx.wg.Add(2)
-	go rc.report.Printer()
+	go rc.Report.Printer()
 	go rc.timer()
 
 	for _, tg := range rc.TcpGroups {
@@ -164,7 +164,6 @@ func (rc *RunConf) Run() *Report {
 	rc.ctx.wg.Wait()
 
 	atomic.StoreInt32(&rc.running, 0)
-	return rc.report
 }
 
 func (rc *RunConf) RemoteRun() {
@@ -176,7 +175,7 @@ func (rc *RunConf) RemoteRun() {
 	ctx.ctx, ctx.cancel = context.WithCancel(context.Background())
 	rc.ctx = ctx
 	var rwlock sync.RWMutex
-	rc.report = &Report{
+	rc.Report = &Report{
 		Success:    0,
 		Receive:    0,
 		Send:       0,
@@ -191,10 +190,10 @@ func (rc *RunConf) RemoteRun() {
 		rc.ctx.wg.Add(1)
 		go rc.sendRemoteConf(remoteIp, confList)
 		rc.ctx.wg.Add(1)
-		go rc.report.RemotePrinter(remoteIp)
+		go rc.Report.RemotePrinter(remoteIp)
 	}
 	rc.ctx.wg.Wait()
-	rc.report.RemotePrintResult()
+	rc.Report.RemotePrintResult()
 }
 
 func (rc *RunConf) sendRemoteConf(remoteDst string, confList []string) {
@@ -265,10 +264,10 @@ func (rc *RunConf) timer() {
 }
 
 func (rc *RunConf) shouldStop() bool {
-	if rc.report.StartTime.IsZero() {
+	if rc.Report.StartTime.IsZero() {
 		return false
 	}
-	return time.Since(rc.report.StartTime).Seconds() > float64(rc.RunTime)
+	return time.Since(rc.Report.StartTime).Seconds() > float64(rc.RunTime)
 }
 
 // isRunning 检查测试是否正在运行

@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>性能测试工具</title>
+    <link rel="icon" href="/static/logo.png" type="image/png">
     <link rel="stylesheet" href="/static/layui/css/layui.css">
     <script src="/static/layui/layui.js"></script>
     <script src="/static/echarts.min.js"></script>
@@ -41,7 +42,10 @@
     <div class="layui-layout layui-layout-admin">
         <!-- 头部 -->
         <div class="layui-header">
-            <div class="layui-logo">性能测试工具</div>
+            <div class="layui-logo">
+                <img src="/static/logo.png" alt="Logo" style="height: 30px; margin-right: 10px; vertical-align: middle;">
+                性能测试工具
+            </div>
         </div>
 
         <!-- 左侧导航栏 -->
@@ -138,37 +142,48 @@
             <div id="reportTab" style="display: none;">
                 <!-- 数据概览 -->
                 <div class="layui-row layui-col-space15 data-overview">
-                    <div class="layui-col-md3">
+                    <div class="layui-col-md2">
+                        <div class="data-card">
+                            <h2 id="runtime">0</h2>
+                            <p>运行时间</p>
+                        </div>
+                    </div>
+                    <div class="layui-col-md2">
                         <div class="data-card">
                             <h2 id="currentQps">0</h2>
                             <p>当前QPS</p>
                         </div>
                     </div>
-                    <div class="layui-col-md3">
+                    <div class="layui-col-md2">
                         <div class="data-card">
                             <h2 id="avgResponseTime">0ms</h2>
                             <p>平均响应时间</p>
                         </div>
                     </div>
-                    <div class="layui-col-md3">
+                    <div class="layui-col-md2">
                         <div class="data-card">
                             <h2 id="successRate">100%</h2>
                             <p>成功率</p>
                         </div>
                     </div>
-                    <div class="layui-col-md3">
+                    <div class="layui-col-md2">
                         <div class="data-card">
-                            <h2 id="activeConns">0</h2>
-                            <p>活跃连接数</p>
+                            <h2 id="send">0</h2>
+                            <p>发送流量</p>
+                        </div>
+                    </div>
+                    <div class="layui-col-md2">
+                        <div class="data-card">
+                            <h2 id="receive">0</h2>
+                            <p>接收流量</p>
                         </div>
                     </div>
                 </div>
 
                 <!-- 图表区域 -->
                 <div class="layui-row layui-col-space15">
-                    <div class="layui-col-md12">
+                    <div class="layui-col-md6">
                         <div class="layui-card">
-                            <div class="layui-card-header">QPS趋势</div>
                             <div class="layui-card-body">
                                 <div id="qpsChart" class="chart-container"></div>
                             </div>
@@ -176,7 +191,13 @@
                     </div>
                     <div class="layui-col-md6">
                         <div class="layui-card">
-                            <div class="layui-card-header">响应时间分布</div>
+                            <div class="layui-card-body">
+                                <div id="trafficChart" class="chart-container"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="layui-col-md6">
+                        <div class="layui-card">
                             <div class="layui-card-body">
                                 <div id="responseTimeChart" class="chart-container"></div>
                             </div>
@@ -184,7 +205,6 @@
                     </div>
                     <div class="layui-col-md6">
                         <div class="layui-card">
-                            <div class="layui-card-header">状态码分布</div>
                             <div class="layui-card-body">
                                 <div id="statusCodeChart" class="chart-container"></div>
                             </div>
@@ -211,6 +231,9 @@
     <script>
         // 添加测试状态变量
         let isTestRunning = false;
+
+        // 添加轮询相关变量和函数
+        let pollInterval;
 
         layui.use(['element', 'form', 'layer'], function(){
             var element = layui.element;
@@ -519,54 +542,46 @@
             // QPS趋势图
             const qpsChart = echarts.init(document.getElementById('qpsChart'));
             const qpsOption = {
-                title: {
-                    text: 'QPS趋势'
+                title: { text: 'QPS趋势' },
+                tooltip: { trigger: 'axis' },
+                legend: {
+                    data: ['QPS']
                 },
-                tooltip: {
-                    trigger: 'axis'
-                },
-                xAxis: {
-                    type: 'time',
-                    splitLine: {
-                        show: false
-                    }
-                },
-                yAxis: {
+                xAxis: { type: 'category', data: [] },
+                yAxis: { 
                     type: 'value',
-                    splitLine: {
-                        show: true
-                    }
+                    name: 'qps'
                 },
-                series: [{
-                    name: 'QPS',
-                    type: 'line',
-                    smooth: true,
-                    data: []
-                }]
+                series: [
+                    {
+                        name: 'QPS',
+                        type: 'line',
+                        data: []
+                    }
+                ]
             };
             qpsChart.setOption(qpsOption);
 
             // 响应时间分布图
             const responseTimeChart = echarts.init(document.getElementById('responseTimeChart'));
             const responseTimeOption = {
-                title: {
-                    text: '响应时间分布'
+                title: { text: '响应时间' },
+                tooltip: { trigger: 'axis' },
+                legend: {
+                    data: ['响应时间']
                 },
-                tooltip: {
-                    trigger: 'axis'
+                xAxis: { type: 'category', data: [] },
+                yAxis: { 
+                    type: 'value',
+                    name: 'ms'
                 },
-                xAxis: {
-                    type: 'category',
-                    data: ['0-100ms', '100-200ms', '200-500ms', '500ms-1s', '>1s']
-                },
-                yAxis: {
-                    type: 'value'
-                },
-                series: [{
-                    name: '请求数',
-                    type: 'bar',
-                    data: [0, 0, 0, 0, 0]
-                }]
+                series: [
+                    {
+                        name: '响应时间',
+                        type: 'line',
+                        data: []
+                    }
+                ]
             };
             responseTimeChart.setOption(responseTimeOption);
 
@@ -592,23 +607,41 @@
             };
             statusCodeChart.setOption(statusCodeOption);
 
+            // 流量统计图
+            const trafficChart = echarts.init(document.getElementById('trafficChart'));
+            trafficChart.setOption({
+                title: { text: '流量统计' },
+                tooltip: { trigger: 'axis' },
+                legend: {
+                    data: ['发送流量', '接收流量']
+                },
+                xAxis: { type: 'category', data: [] },
+                yAxis: { 
+                    type: 'value',
+                    name: 'MB/s'
+                },
+                series: [
+                    {
+                        name: '发送流量',
+                        type: 'line',
+                        data: []
+                    },
+                    {
+                        name: '接收流量',
+                        type: 'line',
+                        data: []
+                    }
+                ]
+            });
+
             // 自动调整图表大小
             window.addEventListener('resize', function() {
                 qpsChart.resize();
                 responseTimeChart.resize();
                 statusCodeChart.resize();
+                trafficChart.resize();
             });
 
-            // 模拟数据更新
-            setInterval(updateCharts, 1000);
-        }
-
-        // 更新图表数据
-        function updateCharts() {
-            document.getElementById('currentQps').innerText = Math.floor(Math.random() * 1000);
-            document.getElementById('avgResponseTime').innerText = Math.floor(Math.random() * 100) + 'ms';
-            document.getElementById('successRate').innerText = (95 + Math.random() * 5).toFixed(2) + '%';
-            document.getElementById('activeConns').innerText = Math.floor(Math.random() * 500);
         }
 
         // 获取所有配置
@@ -716,13 +749,11 @@
         // 修改开始测试函数
         function startTest() {
             if (isTestRunning) return;
-
+            
             const config = getAllConfig();
             fetch('/api/test/start', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(config)
             })
             .then(response => response.json())
@@ -731,17 +762,79 @@
                 layui.layer.msg('测试已开始');
                 isTestRunning = true;
                 updateButtonStates();
-                startWebSocket();
+                startPolling();
             })
             .catch(error => {
                 layui.layer.msg('启动失败：' + error.message);
             });
         }
 
+        // 添加显示测试结果的函数
+        function showTestResult(result) {
+            let content = `
+                <div style="padding: 20px;">
+                    <h3>测试结果统计</h3>
+                    <table class="layui-table">
+                        <tbody>
+                            <tr>
+                                <td>测试时长</td>
+                                <td>${result.duration.toFixed(2)} 秒</td>
+                            </tr>
+                            <tr>
+                                <td>总请求数</td>
+                                <td>${result.totalRequests.toLocaleString()}</td>
+                            </tr>
+                            <tr>
+                                <td>平均 QPS</td>
+                                <td>${result.avgQps.toFixed(2)}</td>
+                            </tr>
+                            <tr>
+                                <td>平均响应时间</td>
+                                <td>${result.avgResponseTime.toFixed(2)} ms</td>
+                            </tr>
+                            <tr>
+                                <td>成功率</td>
+                                <td>${result.successRate.toFixed(2)}%</td>
+                            </tr>
+                            <tr>
+                                <td>总吞吐量</td>
+                                <td>${result.totalTraffic.toFixed(2)} Mbps</td>
+                            </tr>
+                            <tr>
+                                <td>发送流量</td>
+                                <td>${result.send.toFixed(2)} Mbps</td>
+                            </tr>
+                            <tr>
+                                <td>接收流量</td>
+                                <td>${result.receive.toFixed(2)} Mbps</td>
+                            </tr>
+                            <tr>
+                                <td>状态码分布</td>
+                                <td>${Object.entries(result.statusCodes)
+                                    .map(([code, count]) => `${code}: ${count}`)
+                                    .join('<br>')}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
+            layui.layer.open({
+                type: 1,
+                title: '测试完成',
+                area: ['500px', '600px'],
+                content: content,
+                btn: ['确定'],
+                yes: function(index){
+                    layui.layer.close(index);
+                }
+            });
+        }
+
         // 修改停止测试函数
         function stopTest() {
             if (!isTestRunning) return;
-
+            
             fetch('/api/test/stop', {
                 method: 'POST'
             })
@@ -750,84 +843,117 @@
                 layui.layer.msg('测试已停止');
                 isTestRunning = false;
                 updateButtonStates();
-                stopWebSocket();
+                stopPolling();
+                
+                // 显示测试结果
+                if (data.result) {
+                    showTestResult(data.result);
+                }
             })
             .catch(error => {
                 layui.layer.msg('停止失败：' + error.message);
             });
         }
 
-        // WebSocket连接
-        let ws;
-
-        function startWebSocket() {
-            ws = new WebSocket('ws://' + window.location.host + '/ws');
-            
-            ws.onmessage = function(event) {
-                const data = JSON.parse(event.data);
-                updateReportData(data);
-            };
-
-            ws.onclose = function() {
-                console.log('WebSocket连接已关闭');
-                isTestRunning = false;
-                updateButtonStates();
-            };
-
-            ws.onerror = function(error) {
-                console.error('WebSocket错误：', error);
-                layui.layer.msg('实时数据连接失败');
-                isTestRunning = false;
-                updateButtonStates();
-            };
+        function startPolling() {
+            // 初始化图表
+            initCharts();
+            // 开始轮询
+            pollInterval = setInterval(fetchTestStatus, 1000);
         }
 
-        function stopWebSocket() {
-            if (ws) {
-                ws.close();
+        function stopPolling() {
+            if (pollInterval) {
+                clearInterval(pollInterval);
+                pollInterval = null;
             }
         }
 
-        // 更新报告数据
-        function updateReportData(data) {
-            // 更新概览数据
-            document.getElementById('currentQps').innerText = data.qps;
-            document.getElementById('avgResponseTime').innerText = data.avgResponseTime + 'ms';
-            document.getElementById('successRate').innerText = data.successRate + '%';
-            document.getElementById('activeConns').innerText = data.activeConns;
-
-            // 更新图表数据
-            updateCharts(data);
+        function fetchTestStatus() {
+            fetch('/api/test/status')
+                .then(response => response.json())
+                .then(data => {
+                    if (!data.running) {
+                        isTestRunning = false;
+                        updateButtonStates();
+                        stopPolling();
+                        // 如果有最终结果，显示结果弹窗
+                        if (data.result) {
+                            showTestResult(data.result);
+                        }
+                        return;
+                    }
+                    updateCharts(data);
+                })
+                .catch(error => {
+                    console.error('获取状态失败：', error);
+                    layui.layer.msg('获取数据失败');
+                });
         }
 
-        // 修改更新图表函数
+        // 更新图表数据
         function updateCharts(data) {
+            if (!data) return;
+
+            // 更新概览数据
+            document.getElementById('currentQps').innerText = data.avgQps.toFixed(2);
+            document.getElementById('avgResponseTime').innerText = data.avgResponseTime.toFixed(2) + 'ms';
+            document.getElementById('successRate').innerText = data.successRate.toFixed(2) + '%';
+            document.getElementById('send').innerText = data.send.toFixed(2) + 'MB/s';
+            document.getElementById('receive').innerText = data.receive.toFixed(2) + 'MB/s';
+            document.getElementById('runtime').innerText = data.duration.toFixed(2) + '秒';
+            // 更新QPS图表
             const qpsChart = echarts.getInstanceByDom(document.getElementById('qpsChart'));
-            const responseTimeChart = echarts.getInstanceByDom(document.getElementById('responseTimeChart'));
-            const statusCodeChart = echarts.getInstanceByDom(document.getElementById('statusCodeChart'));
-
             if (qpsChart && data.qpsData) {
-                qpsChart.setOption({
-                    series: [{
-                        data: data.qpsData
-                    }]
-                });
+                const option = qpsChart.getOption();
+                option.xAxis[0].data.push(data.qpsData[0]);
+                option.series[0].data.push(data.qpsData[1]);
+                if (option.xAxis[0].data.length > 30) {
+                    option.xAxis[0].data.shift();
+                    option.series[0].data.shift();
+                }
+                qpsChart.setOption(option);
             }
 
+            // 更新响应时间图表
+            const responseTimeChart = echarts.getInstanceByDom(document.getElementById('responseTimeChart'));
             if (responseTimeChart && data.responseTimeData) {
-                responseTimeChart.setOption({
-                    series: [{
-                        data: data.responseTimeData
-                    }]
-                });
+                const option = responseTimeChart.getOption();
+                option.xAxis[0].data.push(data.responseTimeData[0]);
+                option.series[0].data.push(data.responseTimeData[1]);
+                if (option.xAxis[0].data.length > 30) {
+                    option.xAxis[0].data.shift();
+                    option.series[0].data.shift();
+                }
+                responseTimeChart.setOption(option);
             }
 
+            // 更新状态码图表
+            const statusCodeChart = echarts.getInstanceByDom(document.getElementById('statusCodeChart'));
             if (statusCodeChart && data.statusCodeData) {
                 statusCodeChart.setOption({
                     series: [{
-                        data: data.statusCodeData
+                        data: data.statusCodeData.map(item => ({
+                            value: item[1],
+                            name: item[0]
+                        }))
                     }]
                 });
+            }
+
+            // 更新流量图表
+            const trafficChart = echarts.getInstanceByDom(document.getElementById('trafficChart'));
+            if (trafficChart && data.trafficData) {
+                const option = trafficChart.getOption();
+                option.xAxis[0].data.push(data.trafficData[0]);
+                option.series[0].data.push(data.trafficData[1]); // 发送流量
+                option.series[1].data.push(data.trafficData[2]); // 接收流量
+                if (option.xAxis[0].data.length > 30) {
+                    option.xAxis[0].data.shift();
+                    option.series[0].data.shift();
+                    option.series[1].data.shift();
+                }
+                trafficChart.setOption(option);
             }
         }
 

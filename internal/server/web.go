@@ -9,27 +9,29 @@ import (
 	"mmin/web"
 	"net/http"
 	"sync/atomic"
-
-	"github.com/gorilla/websocket"
+	"time"
 )
 
 type WebServer struct {
 	isRunning int32
-	report    *perf.Report
-	clients   map[*websocket.Conn]bool
-	upgrader  websocket.Upgrader
 	runConf   *perf.RunConf
 }
 
+// 添加一个新的结构体来存储最终测试结果
+type TestResult struct {
+	Duration        float64     `json:"duration"`
+	TotalRequests   int64       `json:"totalRequests"`
+	SuccessRate     float64     `json:"successRate"`
+	AvgQPS          float64     `json:"avgQps"`
+	AvgResponseTime float64     `json:"avgResponseTime"`
+	Send            float64     `json:"send"`
+	Receive         float64     `json:"receive"`
+	TotalTraffic    float64     `json:"totalTraffic"`
+	StatusCodes     map[int]int `json:"statusCodes"`
+}
+
 func NewWebServer() *WebServer {
-	return &WebServer{
-		clients: make(map[*websocket.Conn]bool),
-		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool {
-				return true
-			},
-		},
-	}
+	return &WebServer{}
 }
 
 func (s *WebServer) handleAPI(w http.ResponseWriter, r *http.Request) {
@@ -38,6 +40,8 @@ func (s *WebServer) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleStartTest(w, r)
 	case "/api/test/stop":
 		s.handleStopTest(w, r)
+	case "/api/test/status":
+		s.handleTestStatus(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -69,12 +73,29 @@ func (s *WebServer) handleStartTest(w http.ResponseWriter, r *http.Request) {
 	atomic.StoreInt32(&s.isRunning, 1)
 
 	go func() {
-		s.report = runConf.Run()
+		runConf.Run()
 		atomic.StoreInt32(&s.isRunning, 0)
 	}()
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "started"})
+}
+
+func (s *WebServer) getFinshTestResult() TestResult {
+	// 生成测试结果
+	runtime := s.runConf.Report.RunTime
+	result := TestResult{
+		Duration:        runtime,
+		TotalRequests:   s.runConf.Report.Success,
+		SuccessRate:     float64(s.runConf.Report.Respcode[200]) / float64(s.runConf.Report.Success) * 100,
+		AvgQPS:          float64(s.runConf.Report.Success) / float64(runtime),
+		AvgResponseTime: float64(s.runConf.Report.AllReqTime) / float64(s.runConf.Report.Success),
+		Send:            float64(s.runConf.Report.Send) * 8 / 1000 / 1000 / float64(runtime),
+		Receive:         float64(s.runConf.Report.Receive) * 8 / 1000 / 1000 / float64(runtime),
+		TotalTraffic:    float64(s.runConf.Report.Send+s.runConf.Report.Receive) * 8 / 1000 / 1000 / float64(runtime),
+		StatusCodes:     s.runConf.Report.Respcode,
+	}
+	return result
 }
 
 func (s *WebServer) handleStopTest(w http.ResponseWriter, r *http.Request) {
@@ -91,52 +112,78 @@ func (s *WebServer) handleStopTest(w http.ResponseWriter, r *http.Request) {
 	if s.runConf != nil {
 		s.runConf.Stop()
 		atomic.StoreInt32(&s.isRunning, 0)
+
+		result := s.getFinshTestResult()
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "stopped",
+			"result": result,
+		})
+		return
 	}
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "stopped"})
 }
 
-func (s *WebServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := s.upgrader.Upgrade(w, r, nil)
-	if err != nil {
+func (s *WebServer) handleTestStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	defer conn.Close()
 
-	s.clients[conn] = true
-	defer delete(s.clients, conn)
-
-	// Keep connection alive and handle client messages
-	for {
-		_, _, err := conn.ReadMessage()
-		if err != nil {
-			break
-		}
-	}
-}
-
-func (s *WebServer) broadcastReport(report *perf.Report) {
+	isRunning := atomic.LoadInt32(&s.isRunning) > 0
 	data := map[string]interface{}{
-		"qps":             report.Rate,
-		"avgResponseTime": float32(report.AllReqTime) / float32(report.Success),
-		"successRate":     float32(report.Success) * 100,
-		"activeConns":     len(s.clients),
-		"qpsData":         []int64{report.Rate},
-		"responseTimeData": []float64{
-			float64(report.ReqTime) / float64(report.Rate),
-		},
-		"statusCodeData": report.Respcode,
+		"running": isRunning,
 	}
 
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		return
+	if !isRunning {
+		data["result"] = s.getFinshTestResult()
 	}
 
-	for client := range s.clients {
-		client.WriteMessage(websocket.TextMessage, jsonData)
+	if s.runConf.Report != nil && isRunning {
+		// 准备图表数据
+		// 转换状态码数据为图表格式
+		statusCodeData := make([]interface{}, 0)
+		for code, count := range s.runConf.Report.Respcode {
+			statusCodeData = append(statusCodeData, []interface{}{
+				fmt.Sprintf("%d", code),
+				count,
+			})
+		}
+
+		runtime := s.runConf.Report.RunTime
+		// 准备流量数据 (转换为MB/s)
+		trafficData := []interface{}{
+			time.Now().Format("15:04:05"),
+			float64(s.runConf.Report.Send) * 8 / 1000 / 1000 / float64(runtime),    // 发送流量
+			float64(s.runConf.Report.Receive) * 8 / 1000 / 1000 / float64(runtime), // 接收流量
+		}
+
+		// 添加报告数据
+		data["avgQps"] = float32(s.runConf.Report.Success) / float32(runtime)
+		qpsData := []interface{}{
+			time.Now().Format("15:04:05"),
+			data["avgQps"],
+		}
+		data["avgResponseTime"] = float32(s.runConf.Report.AllReqTime) / float32(s.runConf.Report.Success)
+		responseTimeData := []interface{}{
+			time.Now().Format("15:04:05"),
+			data["avgResponseTime"],
+		}
+		data["successRate"] = float32(s.runConf.Report.Respcode[200]) / float32(s.runConf.Report.Success) * 100
+		data["qpsData"] = qpsData
+		data["responseTimeData"] = responseTimeData
+		data["statusCodeData"] = statusCodeData
+		data["trafficData"] = trafficData
+		data["send"] = float32(s.runConf.Report.Send) * 8 / 1000 / 1000 / float32(runtime)
+		data["receive"] = float32(s.runConf.Report.Receive) * 8 / 1000 / 1000 / float32(runtime)
+		data["duration"] = runtime
 	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
 }
 
 func StartWebServer(port string) error {
@@ -145,7 +192,6 @@ func StartWebServer(port string) error {
 
 	// API routes
 	mux.HandleFunc("/api/", server.handleAPI)
-	mux.HandleFunc("/ws", server.handleWebSocket)
 
 	// 静态文件服务
 	fs := web.GetFileSystem()
