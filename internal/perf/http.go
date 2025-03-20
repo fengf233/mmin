@@ -2,6 +2,7 @@ package perf
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -112,4 +113,21 @@ func (h *HTTPconf) GetReqBytes() []byte {
 		}
 	}
 	return newReqBytes
+}
+
+// validate 验证HTTP配置
+func (h *HTTPconf) validate() error {
+	if h.Name == "" {
+		return fmt.Errorf("名称不能为空")
+	}
+	if h.URI == "" {
+		return fmt.Errorf("URI不能为空")
+	}
+	if h.Method == "" {
+		return fmt.Errorf("请求方法不能为空")
+	}
+	if h.Proto == "" {
+		return fmt.Errorf("协议不能为空")
+	}
+	return nil
 }

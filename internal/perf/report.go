@@ -83,7 +83,6 @@ var quantilesTarget = map[float64]float64{
 }
 
 func (r *Report) Printer() {
-	defer r.ctx.wg.Done()
 
 	rowTab := r.createRowTable()
 	rowFormat := rowTab.Print("*")
@@ -223,7 +222,6 @@ func (r *Report) printFinalReport() {
 }
 
 func (r *Report) RemotePrinter(remoteDst string) {
-	defer r.ctx.wg.Done()
 	tryTimes := 0
 	for {
 		select {

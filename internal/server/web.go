@@ -66,14 +66,21 @@ func (s *WebServer) handleStartTest(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Received test configuration: %s", string(body))
 	runConf, err := perf.ReadRunConfByByte(body)
 	if err != nil {
-		http.Error(w, "Invalid configuration", http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("Invalid configuration: %v", err), http.StatusBadRequest)
 		return
 	}
+
+	// 添加配置验证
+	if err := runConf.Validate(); err != nil {
+		http.Error(w, fmt.Sprintf("Configuration validation failed: %v", err), http.StatusBadRequest)
+		return
+	}
+
 	s.runConf = runConf
 	atomic.StoreInt32(&s.isRunning, 1)
 
 	go func() {
-		runConf.Run()
+		s.runConf.Run()
 		atomic.StoreInt32(&s.isRunning, 0)
 	}()
 
@@ -105,7 +112,8 @@ func (s *WebServer) handleStopTest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if atomic.LoadInt32(&s.isRunning) == 0 {
-		http.Error(w, "No test is running", http.StatusBadRequest)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "stopped", "msg": "no test running"})
 		return
 	}
 
@@ -122,7 +130,6 @@ func (s *WebServer) handleStopTest(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "stopped"})
 }
@@ -137,12 +144,13 @@ func (s *WebServer) handleTestStatus(w http.ResponseWriter, r *http.Request) {
 	data := map[string]interface{}{
 		"running": isRunning,
 	}
-
-	if !isRunning {
+	data["activeConnCount"] = perf.ActiveConnCount
+	data["failedConnCount"] = perf.FailedConnCount
+	if !isRunning && s.runConf != nil {
 		data["result"] = s.getFinshTestResult()
 	}
 
-	if s.runConf.Report != nil && isRunning {
+	if s.runConf != nil && s.runConf.Report != nil && isRunning && s.runConf.Report.RunTime > 0 {
 		// 准备图表数据
 		// 转换状态码数据为图表格式
 		statusCodeData := make([]interface{}, 0)
@@ -180,6 +188,7 @@ func (s *WebServer) handleTestStatus(w http.ResponseWriter, r *http.Request) {
 		data["send"] = float32(s.runConf.Report.Send) * 8 / 1000 / 1000 / float32(runtime)
 		data["receive"] = float32(s.runConf.Report.Receive) * 8 / 1000 / 1000 / float32(runtime)
 		data["duration"] = runtime
+		data["successCount"] = s.runConf.Report.Success
 	}
 
 	w.Header().Set("Content-Type", "application/json")

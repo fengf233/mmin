@@ -105,3 +105,17 @@ func newRandomStr(pc *ParamsConf) (*RandomStr, error) {
 func (r *RandomStr) replace(src []byte) []byte {
 	return bytes.Replace(src, r.name, Randomer.StrBytes(r.length), -1)
 }
+
+// validate 验证参数配置
+func (p *ParamsConf) validate() error {
+	if p.Name == "" {
+		return fmt.Errorf("参数名不能为空")
+	}
+	if p.Type == "" {
+		return fmt.Errorf("参数类型不能为空")
+	}
+	if len(p.Spec) == 0 {
+		return fmt.Errorf("参数规格不能为空")
+	}
+	return nil
+}

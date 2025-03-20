@@ -1,7 +1,6 @@
 package perf
 
 import (
-	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -56,34 +55,24 @@ type ConnPool struct {
 	r, w         *int64
 
 	maxConn     int
-	wg          sync.WaitGroup
-	ctx         context.Context
-	cancel      context.CancelFunc
+	ctx         *RunCtx
 	rl          *rate.Limiter
 	tlsConfig   *tls.Config
 	connsChan   chan *MyConn
 	factoryChan chan *MyConn
-	debug       bool
-
-	stats struct {
-		active  int32
-		failed  int32
-		created int32
-	}
-
-	closed    int32         // 添加关闭状态标志
-	closeCh   chan struct{} // 用于通知关闭的channel
-	closeOnce sync.Once     // 确保只关闭一次
+	pool_wg     *sync.WaitGroup
+	closed      int32         // 添加关闭状态标志
+	closeCh     chan struct{} // 用于通知关闭的channel
+	closeOnce   sync.Once     // 确保只关闭一次
 }
 
 // 创建连接池
-func NewConnPool(dst string, srcIP []string, maxConnPerIP int, creatThread int, creatRate int, connThread int, isHttps bool, r *int64, w *int64, connTimeout time.Duration) *ConnPool {
+func NewConnPool(dst string, srcIP []string, maxConnPerIP int, creatThread int, creatRate int, connThread int, isHttps bool, r *int64, w *int64, connTimeout time.Duration, runCtx *RunCtx) *ConnPool {
 	srcIPLen := max(1, len(srcIP))
 	maxConn := srcIPLen * maxConnPerIP
 	atomic.AddInt32(&allPoolMaxConn, int32(maxConn))
 	connsChan := make(chan *MyConn, maxConn)
 	factoryChan := make(chan *MyConn, maxConn)
-	ctx, cancel := context.WithCancel(context.Background())
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: true, // 跳过证书验证
 	}
@@ -91,6 +80,7 @@ func NewConnPool(dst string, srcIP []string, maxConnPerIP int, creatThread int, 
 	if creatRate > 0 {
 		rl = rate.NewLimiter(rate.Limit(creatRate), 1)
 	}
+	pool_wg := &sync.WaitGroup{}
 
 	pool := &ConnPool{
 		dst:          dst,
@@ -104,8 +94,7 @@ func NewConnPool(dst string, srcIP []string, maxConnPerIP int, creatThread int, 
 		w:            w,
 
 		maxConn:     maxConn,
-		ctx:         ctx,
-		cancel:      cancel,
+		ctx:         runCtx,
 		rl:          rl,
 		tlsConfig:   tlsConfig,
 		connsChan:   connsChan,
@@ -113,6 +102,7 @@ func NewConnPool(dst string, srcIP []string, maxConnPerIP int, creatThread int, 
 		closed:      0,
 		closeCh:     make(chan struct{}),
 		closeOnce:   sync.Once{},
+		pool_wg:     pool_wg,
 	}
 	pool.init()
 	return pool
@@ -121,8 +111,12 @@ func NewConnPool(dst string, srcIP []string, maxConnPerIP int, creatThread int, 
 func (pool *ConnPool) init() {
 	pool.creatConns()
 	for i := 0; i < pool.connThread; i++ {
-		pool.wg.Add(1)
-		go pool.factory()
+		// 在ctx上等待
+		pool.ctx.wg.Add(1)
+		go func() {
+			defer pool.ctx.wg.Done()
+			pool.factory()
+		}()
 	}
 }
 
@@ -137,34 +131,51 @@ func (pool *ConnPool) creatConns() {
 		creatConnsNum := pool.maxConnPerIP / threadPerSrcIP
 		for _, srcip := range pool.srcIP {
 			for i := 0; i < threadPerSrcIP; i++ {
-				pool.wg.Add(1)
 				maxCreateConns += creatConnsNum
-				go pool.creat(srcip, creatConnsNum)
+				pool.pool_wg.Add(1)
+				go func() {
+					defer pool.pool_wg.Done()
+					pool.creat(srcip, creatConnsNum)
+				}()
 			}
 		}
 	} else {
 		creatConnsNum := pool.maxConnPerIP / pool.creatThread
 		for i := 0; i < pool.creatThread; i++ {
-			pool.wg.Add(1)
 			maxCreateConns += creatConnsNum
-			go pool.creat("", pool.maxConnPerIP/pool.creatThread)
+			pool.pool_wg.Add(1)
+			go func() {
+				defer pool.pool_wg.Done()
+				pool.creat("", pool.maxConnPerIP/pool.creatThread)
+			}()
 		}
 	}
 	lastConnsNum := pool.maxConn - maxCreateConns
 	if lastConnsNum != 0 {
-		pool.wg.Add(1)
-		go pool.creat("", lastConnsNum)
+		pool.pool_wg.Add(1)
+		go func() {
+			defer pool.pool_wg.Done()
+			pool.creat("", lastConnsNum)
+		}()
 	}
-	pool.wg.Wait()
 }
 
-var poolErr map[string]int = map[string]int{}
-var poolErrMu sync.RWMutex
-var poolConnCount int32
-var allPoolMaxConn int32
+var (
+	poolErr         map[string]int
+	poolErrMu       sync.RWMutex
+	ActiveConnCount int32
+	FailedConnCount int32
+	allPoolMaxConn  int32
+)
 
-func PoolPrint(wg *sync.WaitGroup) {
-	defer wg.Done()
+func PoolGlobalInit() {
+	poolErr = make(map[string]int)
+	ActiveConnCount = 0
+	FailedConnCount = 0
+	allPoolMaxConn = 0
+}
+
+func PoolPrint(ctx *RunCtx) {
 	fmt.Println("Creat TCP conns Start:")
 	var poolformat string
 	rowTab := tabular.New()
@@ -173,28 +184,31 @@ func PoolPrint(wg *sync.WaitGroup) {
 	poolformat = rowTab.Print("*")
 	timeSec := 1
 	for {
-		time.Sleep(1 * time.Second)
-		if poolConnCount < allPoolMaxConn {
-			var errStr string
-			for errK, errV := range poolErr {
-				errStr = errK + ":" + strconv.Itoa(errV) + "\n"
-			}
-			fmt.Printf(poolformat, timeSec, poolConnCount)
-			if errStr != "" {
-				fmt.Print(errStr)
-			}
-			timeSec++
-		} else {
-			fmt.Println("Creat TCP conns:", poolConnCount)
-			fmt.Println("")
+		select {
+		case <-ctx.ctx.Done():
 			return
+		default:
+			time.Sleep(1 * time.Second)
+			if ActiveConnCount < allPoolMaxConn {
+				var errStr string
+				for errK, errV := range poolErr {
+					errStr = errK + ":" + strconv.Itoa(errV) + "\n"
+				}
+				fmt.Printf(poolformat, timeSec, ActiveConnCount)
+				if errStr != "" {
+					fmt.Print(errStr)
+				}
+				timeSec++
+			} else {
+				fmt.Println("Creat TCP conns:", ActiveConnCount)
+				fmt.Println("")
+				return
+			}
 		}
 	}
 }
 
 func (pool *ConnPool) creat(srcip string, maxConnPerIP int) {
-	defer pool.wg.Done()
-
 	dialer := &net.Dialer{
 		Timeout: defaultDialTimeout,
 	}
@@ -205,15 +219,15 @@ func (pool *ConnPool) creat(srcip string, maxConnPerIP int) {
 
 	for created := 0; created < maxConnPerIP; created++ {
 		if pool.rl != nil {
-			if err := pool.rl.Wait(pool.ctx); err != nil {
+			if err := pool.rl.Wait(pool.ctx.ctx); err != nil {
 				return // context cancelled
 			}
 		}
 
 		conn, err := pool.getConn(dialer)
 		if err != nil {
-			atomic.AddInt32(&pool.stats.failed, 1)
-			if pool.debug {
+			atomic.AddInt32(&FailedConnCount, 1)
+			if pool.ctx.debug {
 				poolErrMu.Lock()
 				poolErr[err.Error()]++
 				poolErrMu.Unlock()
@@ -230,10 +244,8 @@ func (pool *ConnPool) creat(srcip string, maxConnPerIP int) {
 
 		select {
 		case pool.connsChan <- myconn:
-			atomic.AddInt32(&pool.stats.created, 1)
-			atomic.AddInt32(&pool.stats.active, 1)
-			atomic.AddInt32(&poolConnCount, 1)
-		case <-pool.ctx.Done():
+			atomic.AddInt32(&ActiveConnCount, 1)
+		case <-pool.ctx.ctx.Done():
 			myconn.Close()
 			return
 		}
@@ -267,7 +279,7 @@ func (pool *ConnPool) Get() *MyConn {
 func (pool *ConnPool) GetWithoutClose() *MyConn {
 	for {
 		select {
-		case <-pool.ctx.Done():
+		case <-pool.ctx.ctx.Done():
 			return nil
 		case conn := <-pool.connsChan:
 			if conn == nil {
@@ -298,7 +310,6 @@ func (pool *ConnPool) GetWithoutClose() *MyConn {
 }
 
 func (pool *ConnPool) factory() {
-	defer pool.wg.Done()
 	defer func() {
 		if r := recover(); r != nil && r != sendOnCloseError {
 			log.Printf("Panic in connection factory: %v", r)
@@ -308,7 +319,7 @@ func (pool *ConnPool) factory() {
 
 	for {
 		select {
-		case <-pool.ctx.Done():
+		case <-pool.ctx.ctx.Done():
 			return
 		case conn, ok := <-pool.factoryChan:
 			if !ok {
@@ -316,7 +327,7 @@ func (pool *ConnPool) factory() {
 			}
 
 			conn.Close()
-			atomic.AddInt32(&pool.stats.active, -1)
+			atomic.AddInt32(&ActiveConnCount, -1)
 
 			newConn, err := pool.getConn(conn.dialer)
 			if err != nil {
@@ -325,7 +336,7 @@ func (pool *ConnPool) factory() {
 			}
 
 			conn.Conn = newConn
-			atomic.AddInt32(&pool.stats.active, 1)
+			atomic.AddInt32(&ActiveConnCount, 1)
 			pool.connsChan <- conn
 		}
 	}
@@ -344,10 +355,7 @@ func (pool *ConnPool) Len() int {
 func (pool *ConnPool) Close() {
 	pool.closeOnce.Do(func() {
 		atomic.StoreInt32(&pool.closed, 1)
-
-		// 先取消上下文
-		pool.cancel()
-
+		pool.pool_wg.Wait()
 		// 关闭通知channel
 		close(pool.closeCh)
 
@@ -366,4 +374,27 @@ func (pool *ConnPool) Close() {
 
 func (p *ConnPool) IsClosed() bool {
 	return atomic.LoadInt32(&p.closed) == 1
+}
+
+// validate 验证TCP组配置
+func (tg *TcpGroup) validate() error {
+	if tg.Name == "" {
+		return fmt.Errorf("组名不能为空")
+	}
+	if tg.Dst == "" {
+		return fmt.Errorf("目标地址不能为空")
+	}
+	if tg.MaxTcpConnPerIP <= 0 {
+		return fmt.Errorf("每IP最大连接数必须大于0")
+	}
+	if tg.ReqThread <= 0 {
+		return fmt.Errorf("请求线程数必须大于0")
+	}
+	if tg.MaxReqest <= 0 {
+		return fmt.Errorf("每TCP最大请求数必须大于0")
+	}
+	if len(tg.SendHttp) == 0 {
+		return fmt.Errorf("HTTP请求列表不能为空")
+	}
+	return nil
 }

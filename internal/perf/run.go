@@ -142,24 +142,43 @@ func (rc *RunConf) Run() {
 		return
 	}
 
-	// 启动连接池
-	rc.ctx.wg.Add(1)
-	go PoolPrint(rc.ctx.wg)
+	// 初始化连接池
+	PoolGlobalInit()
+	// 启动连接池打印
+	var pool_init_wg sync.WaitGroup
+	pool_init_wg.Add(1)
+	go func() {
+		defer pool_init_wg.Done()
+		PoolPrint(rc.ctx)
+	}()
 
 	for _, tg := range rc.TcpGroups {
-		rc.ctx.wg.Add(1)
-		go tg.InitPool()
+		pool_init_wg.Add(1)
+		go func() {
+			defer pool_init_wg.Done()
+			tg.InitPool()
+		}()
 	}
-	rc.ctx.wg.Wait()
+	pool_init_wg.Wait()
 
 	// 启动测试
-	rc.ctx.wg.Add(2)
-	go rc.Report.Printer()
-	go rc.timer()
+	rc.ctx.wg.Add(1)
+	go func() {
+		defer rc.ctx.wg.Done()
+		rc.Report.Printer()
+	}()
+	// rc.ctx.wg.Add(1)
+	go func() {
+		// defer rc.ctx.wg.Done()
+		rc.timer()
+	}()
 
 	for _, tg := range rc.TcpGroups {
 		rc.ctx.wg.Add(1)
-		go tg.Run()
+		go func() {
+			defer rc.ctx.wg.Done()
+			tg.Run()
+		}()
 	}
 	rc.ctx.wg.Wait()
 
@@ -188,16 +207,21 @@ func (rc *RunConf) RemoteRun() {
 	}
 	for remoteIp, confList := range rc.RemoteServer {
 		rc.ctx.wg.Add(1)
-		go rc.sendRemoteConf(remoteIp, confList)
+		go func() {
+			defer rc.ctx.wg.Done()
+			rc.sendRemoteConf(remoteIp, confList)
+		}()
 		rc.ctx.wg.Add(1)
-		go rc.Report.RemotePrinter(remoteIp)
+		go func() {
+			defer rc.ctx.wg.Done()
+			rc.Report.RemotePrinter(remoteIp)
+		}()
 	}
 	rc.ctx.wg.Wait()
 	rc.Report.RemotePrintResult()
 }
 
 func (rc *RunConf) sendRemoteConf(remoteDst string, confList []string) {
-	defer rc.ctx.wg.Done()
 	newRunConf := &RunConf{
 		RunTime:   rc.RunTime,
 		Debug:     rc.Debug,
@@ -243,7 +267,6 @@ func (rc *RunConf) sendRemoteConf(remoteDst string, confList []string) {
 }
 
 func (rc *RunConf) timer() {
-	defer rc.ctx.wg.Done()
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(signals)
@@ -278,7 +301,15 @@ func (rc *RunConf) isRunning() bool {
 func (rc *RunConf) shutdown() {
 	// 先调用 cancel 通知所有 goroutine 停止
 	rc.ctx.cancel()
-
+	// //调试用
+	// time.Sleep(2 * time.Second)
+	// fmt.Println("figo:", runtime.NumGoroutine())
+	// // 访问/debug/pprof/goroutine?debug=2
+	// go func() {
+	// 	fmt.Println("pprof start...")
+	// 	fmt.Println(http.ListenAndServe(":9876", nil))
+	// }()
+	rc.ctx.wg.Wait()
 	// 使用 WaitGroup 等待所有连接处理完成
 	var wg sync.WaitGroup
 	for _, tg := range rc.TcpGroups {
@@ -291,4 +322,55 @@ func (rc *RunConf) shutdown() {
 		}
 	}
 	wg.Wait()
+}
+
+// Validate 验证配置的有效性
+func (rc *RunConf) Validate() error {
+	// 验证基本配置
+	if rc.RunTime <= 0 {
+		return fmt.Errorf("运行时间必须大于0")
+	}
+
+	// 验证TCP组配置
+	if len(rc.TcpGroups) == 0 {
+		return fmt.Errorf("至少需要配置一个TCP组")
+	}
+
+	// 验证每个TCP组
+	for _, tg := range rc.TcpGroups {
+		if err := tg.validate(); err != nil {
+			return fmt.Errorf("TCP组 %s 配置错误: %v", tg.Name, err)
+		}
+	}
+
+	// 验证HTTP配置
+	if len(rc.HTTPconfs) == 0 {
+		return fmt.Errorf("至少需要配置一个HTTP请求")
+	}
+
+	// 验证每个HTTP配置
+	httpNames := make(map[string]bool)
+	for _, http := range rc.HTTPconfs {
+		if err := http.validate(); err != nil {
+			return fmt.Errorf("HTTP配置 %s 错误: %v", http.Name, err)
+		}
+		if httpNames[http.Name] {
+			return fmt.Errorf("HTTP配置名称 %s 重复", http.Name)
+		}
+		httpNames[http.Name] = true
+	}
+
+	// 验证参数配置
+	paramNames := make(map[string]bool)
+	for _, param := range rc.ParamsConfs {
+		if err := param.validate(); err != nil {
+			return fmt.Errorf("参数配置 %s 错误: %v", param.Name, err)
+		}
+		if paramNames[param.Name] {
+			return fmt.Errorf("参数名称 %s 重复", param.Name)
+		}
+		paramNames[param.Name] = true
+	}
+
+	return nil
 }

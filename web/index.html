@@ -43,7 +43,7 @@
         <!-- 头部 -->
         <div class="layui-header">
             <div class="layui-logo">
-                <img src="/static/logo.png" alt="Logo" style="height: 30px; margin-right: 10px; vertical-align: middle;">
+                <img src="/static/logo.png" alt="Logo" style="height: 45px; margin-right: 10px; vertical-align: middle;">
                 性能测试工具
             </div>
         </div>
@@ -57,6 +57,9 @@
                     </li>
                     <li class="layui-nav-item">
                         <a href="javascript:;" onclick="showTab('report')">报告</a>
+                    </li>
+                    <li class="layui-nav-item">
+                        <a href="javascript:;" onclick="showTestHistory()">历史记录</a>
                     </li>
                 </ul>
             </div>
@@ -142,40 +145,54 @@
             <div id="reportTab" style="display: none;">
                 <!-- 数据概览 -->
                 <div class="layui-row layui-col-space15 data-overview">
-                    <div class="layui-col-md2">
+                    <div class="layui-col-md3">
                         <div class="data-card">
                             <h2 id="runtime">0</h2>
                             <p>运行时间</p>
                         </div>
                     </div>
-                    <div class="layui-col-md2">
+                    <div class="layui-col-md3">
                         <div class="data-card">
                             <h2 id="currentQps">0</h2>
                             <p>当前QPS</p>
                         </div>
                     </div>
-                    <div class="layui-col-md2">
+                    <div class="layui-col-md3">
                         <div class="data-card">
                             <h2 id="avgResponseTime">0ms</h2>
-                            <p>平均响应时间</p>
+                            <p>响应时间</p>
                         </div>
                     </div>
-                    <div class="layui-col-md2">
+                    <div class="layui-col-md3">
                         <div class="data-card">
                             <h2 id="successRate">100%</h2>
-                            <p>成功率</p>
+                            <p>成功率 </p>
                         </div>
                     </div>
-                    <div class="layui-col-md2">
+                </div>
+                <div class="layui-row layui-col-space15 data-overview">
+                    <div class="layui-col-md3">
                         <div class="data-card">
                             <h2 id="send">0</h2>
                             <p>发送流量</p>
                         </div>
                     </div>
-                    <div class="layui-col-md2">
+                    <div class="layui-col-md3">
                         <div class="data-card">
                             <h2 id="receive">0</h2>
                             <p>接收流量</p>
+                        </div>
+                    </div>
+                    <div class="layui-col-md3">
+                        <div class="data-card">
+                            <h2 id="activeConnCount">0</h2>
+                            <p>连接数 </p>
+                        </div>
+                    </div>
+                    <div class="layui-col-md3">
+                        <div class="data-card">
+                            <h2 id="successCount">0</h2>
+                            <p>成功数 </p>
                         </div>
                     </div>
                 </div>
@@ -539,6 +556,14 @@
 
         // 初始化图表
         function initCharts() {
+            document.getElementById('currentQps').innerText = 0;
+            document.getElementById('avgResponseTime').innerText = 0 + 'ms';
+            document.getElementById('successRate').innerText = 0 + '%';
+            document.getElementById('send').innerText = 0 + 'MB/s';
+            document.getElementById('receive').innerText = 0 + 'MB/s';
+            document.getElementById('runtime').innerText = 0 + 's';
+            document.getElementById('activeConnCount').innerText = 0;
+            document.getElementById('successCount').innerText = 0;
             // QPS趋势图
             const qpsChart = echarts.init(document.getElementById('qpsChart'));
             const qpsOption = {
@@ -756,7 +781,15 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(config)
             })
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    // 读取错误信息
+                    return response.text().then(text => {
+                        throw new Error(text);
+                    });
+                }
+                return response.json();
+            })
             .then(data => {
                 showTab('report');
                 layui.layer.msg('测试已开始');
@@ -765,11 +798,122 @@
                 startPolling();
             })
             .catch(error => {
-                layui.layer.msg('启动失败：' + error.message);
+                // 使用 layer 弹窗显示详细错误信息
+                layui.layer.open({
+                    type: 1,
+                    title: '配置错误',
+                    area: ['500px', 'auto'],
+                    content: `<div style="padding: 20px;">
+                        <div class="layui-bg-red" style="padding: 10px; border-radius: 4px;">
+                            ${error.message}
+                        </div>
+                    </div>`,
+                    btn: ['确定']
+                });
             });
         }
 
-        // 添加显示测试结果的函数
+        // 添加历史记录相关函数
+        function saveTestResult(result) {
+            // 从localStorage获取历史记录
+            let history = JSON.parse(localStorage.getItem('testHistory') || '[]');
+            
+            // 添加新的测试结果，包含时间戳
+            const testResult = {
+                timestamp: new Date().toISOString(),
+                result: result
+            };
+            
+            // 将新结果添加到开头
+            history.unshift(testResult);
+            
+            // 最多保存最近10条记录
+            if (history.length > 10) {
+                history = history.slice(0, 10);
+            }
+            
+            // 保存回localStorage
+            localStorage.setItem('testHistory', JSON.stringify(history));
+        }
+
+        // 显示历史记录
+        function showTestHistory() {
+            const history = JSON.parse(localStorage.getItem('testHistory') || '[]');
+            if (history.length === 0) {
+                layui.layer.msg('暂无历史记录');
+                return;
+            }
+
+            let content = `
+                <div style="padding: 20px;">
+                    <table class="layui-table">
+                        <thead>
+                            <tr>
+                                <th>测试时间</th>
+                                <th>持续时间</th>
+                                <th>总请求数</th>
+                                <th>平均QPS</th>
+                                <th>成功率</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${history.map((item, index) => `
+                                <tr>
+                                    <td>${new Date(item.timestamp).toLocaleString()}</td>
+                                    <td>${item.result.duration.toFixed(2)}秒</td>
+                                    <td>${item.result.totalRequests.toLocaleString()}</td>
+                                    <td>${item.result.avgQps.toFixed(2)}</td>
+                                    <td>${item.result.successRate.toFixed(2)}%</td>
+                                    <td>
+                                        <button class="layui-btn layui-btn-xs" onclick="showHistoryDetail(${index})">
+                                            详情
+                                        </button>
+                                        <button class="layui-btn layui-btn-xs layui-btn-danger" onclick="deleteHistoryItem(${index})">
+                                            删除
+                                        </button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
+            layui.layer.open({
+                type: 1,
+                title: '测试历史记录',
+                area: ['900px', '600px'],
+                content: content,
+                btn: ['关闭'],
+                yes: function(index) {
+                    layui.layer.close(index);
+                }
+            });
+        }
+
+        // 显示历史记录详情
+        function showHistoryDetail(index) {
+            const history = JSON.parse(localStorage.getItem('testHistory') || '[]');
+            if (index >= 0 && index < history.length) {
+                showTestResult(history[index].result);
+            }
+        }
+
+        // 删除历史记录
+        function deleteHistoryItem(index) {
+            layui.layer.confirm('确定要删除这条记录吗？', {
+                btn: ['确定', '取消']
+            }, function() {
+                let history = JSON.parse(localStorage.getItem('testHistory') || '[]');
+                history.splice(index, 1);
+                localStorage.setItem('testHistory', JSON.stringify(history));
+                showTestHistory(); // 刷新历史记录显示
+                layui.layer.msg('删除成功');
+            });
+        }
+
+        // 修改原有的 showTestResult 函数
         function showTestResult(result) {
             let content = `
                 <div style="padding: 20px;">
@@ -824,8 +968,13 @@
                 title: '测试完成',
                 area: ['500px', '600px'],
                 content: content,
-                btn: ['确定'],
-                yes: function(index){
+                btn: ['保存', '关闭'],
+                yes: function(index) {
+                    saveTestResult(result);
+                    layui.layer.msg('结果已保存');
+                    layui.layer.close(index);
+                },
+                btn2: function(index) {
                     layui.layer.close(index);
                 }
             });
@@ -834,7 +983,7 @@
         // 修改停止测试函数
         function stopTest() {
             if (!isTestRunning) return;
-            
+            stopPolling();
             fetch('/api/test/stop', {
                 method: 'POST'
             })
@@ -895,13 +1044,19 @@
         function updateCharts(data) {
             if (!data) return;
 
+            document.getElementById('activeConnCount').innerText = data.activeConnCount;
+            if (!data.avgQps) {
+                return;
+            }
             // 更新概览数据
             document.getElementById('currentQps').innerText = data.avgQps.toFixed(2);
             document.getElementById('avgResponseTime').innerText = data.avgResponseTime.toFixed(2) + 'ms';
             document.getElementById('successRate').innerText = data.successRate.toFixed(2) + '%';
             document.getElementById('send').innerText = data.send.toFixed(2) + 'MB/s';
             document.getElementById('receive').innerText = data.receive.toFixed(2) + 'MB/s';
-            document.getElementById('runtime').innerText = data.duration.toFixed(2) + '秒';
+            document.getElementById('runtime').innerText = data.duration.toFixed(2) + 's';
+            document.getElementById('activeConnCount').innerText = data.activeConnCount;
+            document.getElementById('successCount').innerText = data.successCount;
             // 更新QPS图表
             const qpsChart = echarts.getInstanceByDom(document.getElementById('qpsChart'));
             if (qpsChart && data.qpsData) {

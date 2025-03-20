@@ -92,21 +92,22 @@ func (tg *TcpGroup) InitPool() {
 		&tg.r.Receive,
 		&tg.r.Send,
 		tg.connTimeout,
+		tg.ctx,
 	)
-	tg.pool.debug = tg.ctx.debug
-	defer tg.ctx.wg.Done()
 }
+
 func (tg *TcpGroup) Run() {
 	for i := 0; i < tg.ReqThread; i++ {
 		tg.ctx.wg.Add(1)
-		go tg.task()
+		go func() {
+			defer tg.ctx.wg.Done()
+			tg.task()
+		}()
 	}
-	defer tg.ctx.wg.Done()
 }
 
 func (tg *TcpGroup) task() {
 	defer func() {
-		tg.ctx.wg.Done()
 		if v := recover(); v != nil {
 			if v == sendOnCloseError || strings.Contains(fmt.Sprint(v), "send on closed channel") {
 				return
