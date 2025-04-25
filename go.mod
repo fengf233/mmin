@@ -11,6 +11,5 @@ require (
 )
 
 require (
-	github.com/gorilla/websocket v1.5.3
 	github.com/kr/text v0.2.0 // indirect
 )

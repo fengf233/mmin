@@ -57,7 +57,7 @@ func parseFlags() *Config {
 	cfg := &Config{}
 
 	flag.StringVar(&cfg.confName, "conf", "", "配置文件路径 (yaml,json格式)")
-	flag.BoolVar(&cfg.isRemote, "S", false, "作为远程节点")
+	// flag.BoolVar(&cfg.isRemote, "remote", false, "作为远程节点")
 	flag.BoolVar(&cfg.isWeb, "web", false, "启动web服务")
 	flag.StringVar(&cfg.serverPort, "p", defaultPort, "服务器监听端口")
 	flag.StringVar(&cfg.urlStr, "u", "", "目标URL (例如: http://example.com:8080/path)")
