@@ -59,7 +59,7 @@
                         <a href="javascript:;" onclick="showTab('report')">报告</a>
                     </li>
                     <li class="layui-nav-item">
-                        <a href="javascript:;" onclick="showTestHistory()">历史记录</a>
+                        <a href="javascript:;" onclick="showTab('history')">历史记录</a>
                     </li>
                 </ul>
             </div>
@@ -230,6 +230,14 @@
                     </div>
                 </div>
             </div>
+
+             <!-- 测试历史记录部分 -->
+            <div id="historyTab" style="display: none;">
+                <!-- 这里可以添加测试历史记录的具体内容 -->
+                <div id="testHistoryContent">
+                    <!-- 测试历史记录将动态加载到这里 -->
+                </div>
+            </div>
         </div>
 
         <!-- 底部固定区域 -->
@@ -283,13 +291,18 @@
 
         // 切换标签页
         function showTab(tab) {
+            const tabs = ['configTab', 'reportTab', 'historyTab'];
+            tabs.forEach(t => {
+                document.getElementById(t).style.display = 'none';
+            });
             if (tab === 'config') {
                 document.getElementById('configTab').style.display = 'block';
-                document.getElementById('reportTab').style.display = 'none';
-            } else {
-                document.getElementById('configTab').style.display = 'none';
+            } else if (tab === 'report') {
                 document.getElementById('reportTab').style.display = 'block';
                 initCharts();
+            } else if (tab === 'history') {
+                document.getElementById('historyTab').style.display = 'block';
+                showTestHistory();
             }
         }
 
@@ -880,17 +893,9 @@
                     </table>
                 </div>
             `;
-
-            layui.layer.open({
-                type: 1,
-                title: '测试历史记录',
-                area: ['900px', '600px'],
-                content: content,
-                btn: ['关闭'],
-                yes: function(index) {
-                    layui.layer.close(index);
-                }
-            });
+            const testHistoryContent = document.getElementById('testHistoryContent');
+            testHistoryContent.innerHTML = content;
+            
         }
 
         // 显示历史记录详情

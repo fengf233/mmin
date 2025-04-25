@@ -36,33 +36,33 @@ mmin是一个go实现的基于TCP的压测工具，目的是为了模拟测试�
 
 > 注意:当设置线程数过大时,需要查看进程文件句柄是否有限制,ulimit -n查看,如果-c大于ulimit -n,可能会报错open file too many
 
-### 命令行参数说明
+### 命令行参数
 
 ```shell
-Usage of ./mmin:
+Usage of ./mmin-mac-arm64:
   -H value
-        自定义头:-H 'Content-Type: application/json'
-  -P string
-        -S下生效,指定监听端口 (default "8888")
-  -R int
-        限制RPS发送请求速率,默认不限制
-  -S    以服务端的方式运行,-P指定监听端口
+        自定义HTTP头 (可重复使用)
+  -X string
+        HTTP请求方法 (default "GET")
   -c int
-        请求线程数,默认100 (default 100)
+        并发线程数 (default 100)
   -conf string
-        指定运行的yaml文件,其他选项会失效,优先执行yaml文件
-  -data string
-        发送body:-data 'a=1&b=2'
-  -debug
-        是否打开打印调试信息
+        配置文件路径 (yaml,json格式)
+  -d string
+        POST请求体数据
   -k int
-        设置每个TCP最多发送多少请求,默认100 (default 100)
-  -m string
-        请求方法 (default "GET")
+        单个TCP连接最大请求数 (default 100)
+  -port string
+        服务器监听端口 (default "8888")
+  -r int
+        每秒请求数限制(0表示不限制)
   -t int
-        运行时间,默认10s (default 10)
+        运行时间(秒) (default 10)
   -u string
-        URL地址:http://test.com:8080/test
+        目标URL (例如: http://example.com:8080/path)
+  -v    显示详细调试信息
+  -web
+        启动web服务
 ```
 
 ### 结果说明
@@ -109,43 +109,41 @@ Status  响应码统计
 ReqTime Quantile: 请求响应时间分位统计
 ```
 
+## web服务
+启动web服务后，可以通过浏览器访问URL_ADDRESS启动web服务后，可以通过浏览器访问http://localhost:8888/
+```shell
+./mmin -web -port 8888
+```
+
+![web1图片描述](./web1.jpg)
+![web2图片描述](./web2.jpg)
+
+
 ## 配置说明
 
 除了类似于ab的运行方式，还支持运行conf的方式，当使用-conf后，会根据指定的yaml运行压测，配置说明如下
-
 ```yaml
+RunTime: 5                          #总体运行时间      
+Debug: False
 
-RunTime: 5                          #总体运行时间           
-Debug: true                         #是否开启debug打印
-RemoteServer: {                     #指定远程服务器运行对应的group,如果为空,表示本地执行
-  "test_server1:8888":["group1"],   #远程服务器地址,以及远程服务器要运行的groupName,支持多个
-  "test_server2:8888":["group2"],
-}
-
-TcpGroups:              
-- Name: group1                      #group标志符,用于远程执行
-  MaxTcpConnPerIP: 10000            #每个源IP创建最大的TCP连接数
-  TcpCreatThread: 1                 #初始化创建TCP池的线程,一般为1就行,只是测大并发时可以调高
-  TcpConnThread: 10                 #循环生产TCP池的线程,就是当MaxReqest满足关闭TCP后,补充创建TCP的线程,长连接的情况设置ReqThread/MaxReqest就差不多了
-  TcpCreatRate: 0                   #初始化创建TCP的速率,0为不限制
+TcpGroups: 
+- Name: group1           
+  MaxTcpConnPerIP: 10000            #每个源IP创建最大TCP连接数
   SrcIP: ["2.0.0.19","2.0.0.100" ]  #源IP,为[]表示使用默认IP
   MaxQps: 500                       #发送http请求最大QPS 
-  Dst: 2.0.0.67:80                  #TCP目的地址,只支持ip
+  Dst: 2.0.0.67:80                  #TCP目的地址
   ReqThread: 10                     #发送http请求的线程数
   MaxReqest: 100                    #每个TCP连接最多发送多少连接
   IsHttps: false                    #是否是https
-  SendHttp: ["test1","test2"]       #每个TCP连接中循环发送的http请求
-- Name: group2                      #可以配置多个组
-  MaxTcpConnPerIP: 10000
-  TcpCreatThread: 1            
-  TcpConnThread: 10                 
-  SrcIP: ["2.0.0.19","2.0.0.100" ]  
-  MaxQps: 500                       
-  Dst: 2.0.0.67:80                  
-  ReqThread: 10                     
-  MaxReqest: 100                    
-  IsHttps: false                    
-  SendHttp: ["test2"]               
+  SendHttp: ["test1"]               #每个TCP连接中循环发送的http请求
+
+Params:                             #定义参数,可以在HTTPConfs中使用
+- Name: aaa
+  Type: RandomInt
+  Spec: [1,10]
+- Name: bbb
+  Type: RandomStr
+  Spec: [10]
 
 HTTPConfs:                          #定义发送的http请求
 - Name: test1                       #http请求标志符
@@ -156,15 +154,27 @@ HTTPConfs:                          #定义发送的http请求
     "test":"faf"
   }
   Body: ""                          #body内容,字符串方式
-- Name: test2
-  Proto: HTTP/1.1
-  Method: POST
-  URI: http://2.0.0.67?a=1
-  Header: {
-    "test":"faf"
-  }
-  Body: "a=b&&b=c"
+  FileUpload: ""                    #文件上传,支持多文件上传,文件路径可以是相对路径,也可以是绝对路径
+  UseParams: ["aaa","bbb"]          #使用参数,可以使用Params中定义的参数,支持多个
+
 ```
+其他可选的TcpGroups参数如下
+```yaml
+TcpGroups:
+  ...
+  TcpCreatThread: 1                 #初始化创建TCP池的线程,一般为1就行,只是测大并发时可以调高
+  TcpConnThread: 10                 #循环生产TCP池的线程,就是当MaxReqest满足关闭TCP后,补充创建TCP的线程,长连接的情况设置ReqThread/MaxReqest就差不多了
+  TcpCreatRate: 0                   #初始化创建TCP的速率,0为不限制
+  WriteTimeout: 10                  #TCP写超时时间,单位秒
+  ReadTimeout: 10                   #TCP读超时时间,单位秒
+  ConnTimeout: 10                   #TCP连接超时时间,单位秒
+```
+
+命令运行方式
+```shell
+./mmin -conf test.yaml
+```
+
 
 ## 测试案例
 
@@ -187,10 +197,7 @@ Debug: false
 
 TcpGroups: 
 - Name: group1                      
-  MaxTcpConnPerIP: 1000      #由于测试qps,一般是长连接,所以tcp可以不用设置太多,比ReqThread多一点就行
-  TcpCreatThread: 1          #由于tcp较少,初始化1000个tcp只需要1个线程就够用了     
-  TcpConnThread: 10          #由于测试qps,一般是长连接,回收TCP连接线程10个就够了      
-  TcpCreatRate: 0            #1000个tcp,不用限制速率          
+  MaxTcpConnPerIP: 1000      #由于测试qps,一般是长连接,所以tcp可以不用设置太多,比ReqThread多一点就行     
   SrcIP: []                  #源ip默认就行
   MaxQps: 0                  #设置0不限速,如果需要测试被压测机在某个QPS下的情况,可以设置限速                
   Dst: 2.0.0.67:80           #TCP目的地址,只支持ip         
@@ -250,11 +257,6 @@ send_timeout  500;
 
 ```yaml
 RunTime: 20                                    
-Debug: false
-RemoteServer: {                     
-  "test_server1:8888":["group1"],   #server1创建50w个
-  "test_server2:8888":["group2"],   #server2创建50w个
-}
 
 TcpGroups: 
 - Name: group1                      
@@ -283,13 +285,8 @@ HTTPConfs:
   }
   Body: ""
 ```
-运行
+多开几个窗口运行
 ```shell
-server1:
-./mmin -S
-server2:
-./mmin -S
-server3:
 ./mmin -conf test.yaml
 ```
 
@@ -304,13 +301,8 @@ Debug: false
 
 TcpGroups: 
 - Name: group1                      
-  MaxTcpConnPerIP: 10000      #每个srcip的TCP连接数,新建连接就是不断建不断拆,这里总连接数可以与预估新建速率相仿,比如新建速率大概5w,有5个srcip,每个ip就10000
-  TcpCreatThread: 10          #由于tcp较多,可以调高点 
-  TcpConnThread: 1000         #由于新建连接就是不断建不断拆,所以可以与ReqThread接近,如果性能没有上去再调高     
-  TcpCreatRate: 100000        #可以限制一定速率         
-  SrcIP: [                    #源ip要5个，需要自己先把网卡的ip设置上,ip addr add 2.0.0.1/24 dev eth1
-"2.0.0.1","2.0.0.2".."2.0.0.10"
-  ]                           #为什么要多个ip,因为调用了conn.close,所以客户端也会有大量timewait,多点ip可以分摊些复用timewait的时间
+  MaxTcpConnPerIP: 10000      #每个srcip的TCP连接数,新建连接就是不断建不断拆,这里总连接数可以与预估新建速率相仿,比如新建速率大概5w,有5个srcip,每个ip就10000  
+  SrcIP: []                   
   MaxQps: 50000               #预计50000的新建               
   Dst: 2.0.0.67:80            #TCP目的地址,只支持ip         
   ReqThread: 1000             #速率上不去可以调高                
@@ -340,9 +332,7 @@ Debug: false
 TcpGroups: 
 - Name: group1                      
   MaxTcpConnPerIP: 50000     #5w个用户并发,可能需要5w个TCP
-  TcpCreatThread: 10         #可以调高一点     
-  TcpConnThread: 1000        #可以调高一些     
-  TcpCreatRate: 0            #不用限制速率          
+  TcpConnThread: 1000        #可以调高一些      
   SrcIP: []                  #源ip默认就行,不够可以加ip
   MaxQps: 0                  #设置0不限速,如果需要测试被压测机在某个QPS下的情况,可以设置限速                
   Dst: 2.0.0.67:80           #TCP目的地址,只支持ip         

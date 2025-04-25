@@ -56,10 +56,6 @@ type Config struct {
 func parseFlags() *Config {
 	cfg := &Config{}
 
-	flag.StringVar(&cfg.confName, "conf", "", "配置文件路径 (yaml,json格式)")
-	// flag.BoolVar(&cfg.isRemote, "remote", false, "作为远程节点")
-	flag.BoolVar(&cfg.isWeb, "web", false, "启动web服务")
-	flag.StringVar(&cfg.serverPort, "p", defaultPort, "服务器监听端口")
 	flag.StringVar(&cfg.urlStr, "u", "", "目标URL (例如: http://example.com:8080/path)")
 	flag.IntVar(&cfg.reqThread, "c", defaultThreads, "并发线程数")
 	flag.IntVar(&cfg.runTime, "t", defaultRunTime, "运行时间(秒)")
@@ -67,8 +63,13 @@ func parseFlags() *Config {
 	flag.StringVar(&cfg.postBody, "d", "", "POST请求体数据")
 	flag.StringVar(&cfg.method, "X", defaultMethod, "HTTP请求方法")
 	flag.IntVar(&cfg.maxRequest, "k", defaultMaxReq, "单个TCP连接最大请求数")
-	flag.BoolVar(&cfg.debug, "v", false, "显示详细调试信息")
 	flag.Var(&cfg.headers, "H", "自定义HTTP头 (可重复使用)")
+
+	flag.BoolVar(&cfg.debug, "v", false, "显示详细调试信息")
+	flag.StringVar(&cfg.confName, "conf", "", "配置文件路径 (yaml,json格式)")
+	// flag.BoolVar(&cfg.isRemote, "remote", false, "作为远程节点")
+	flag.BoolVar(&cfg.isWeb, "web", false, "启动web服务")
+	flag.StringVar(&cfg.serverPort, "port", defaultPort, "服务器监听端口")
 
 	flag.Parse()
 	return cfg
