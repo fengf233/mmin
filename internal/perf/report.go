@@ -47,6 +47,25 @@ type ReqResult struct {
 	reqtime int64
 }
 
+var reqResultPool = &sync.Pool{
+	New: func() interface{} {
+		return &ReqResult{}
+	},
+}
+
+// GetReqResult 从对象池获取 ReqResult 对象
+func GetReqResult() *ReqResult {
+	return reqResultPool.Get().(*ReqResult)
+}
+
+func PutReqResult(r *ReqResult) {
+	// 重置对象状态
+	r.code = 0
+	r.start = time.Time{}
+	r.reqtime = 0
+	reqResultPool.Put(r)
+}
+
 func NewReport(ctx *RunCtx, maxResult int) *Report {
 	return &Report{
 		Success:       0,
@@ -101,6 +120,7 @@ func (r *Report) Printer() {
 				r.initStartTime(result.start)
 				isStarted = true
 				lastPrintTime = result.start
+				PutReqResult(result)
 				continue
 			}
 
@@ -110,6 +130,7 @@ func (r *Report) Printer() {
 				r.printProgress(rowFormat)
 				lastPrintTime = result.start
 			}
+			PutReqResult(result)
 		default:
 		}
 	}

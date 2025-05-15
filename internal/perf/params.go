@@ -79,7 +79,7 @@ func newRandomInt(pc *ParamsConf) (*RandomInt, error) {
 }
 
 func (r *RandomInt) replace(src []byte) []byte {
-	return bytes.Replace(src, r.name, Randomer.IntBytes(r.start, r.end), -1)
+	return bytes.ReplaceAll(src, r.name, Randomer.IntBytes(r.start, r.end))
 }
 
 type RandomStr struct {
@@ -103,7 +103,7 @@ func newRandomStr(pc *ParamsConf) (*RandomStr, error) {
 }
 
 func (r *RandomStr) replace(src []byte) []byte {
-	return bytes.Replace(src, r.name, Randomer.StrBytes(r.length), -1)
+	return bytes.ReplaceAll(src, r.name, Randomer.StrBytes(r.length))
 }
 
 // validate 验证参数配置

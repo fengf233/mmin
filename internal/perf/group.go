@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -160,6 +161,13 @@ func (tg *TcpGroup) task() {
 	}
 }
 
+// 添加一个 bufio.Reader 对象池
+var bufioReaderPool = &sync.Pool{
+	New: func() interface{} {
+		return bufio.NewReader(nil)
+	},
+}
+
 func (tg *TcpGroup) doReq(conn net.Conn, httpByte []byte) (*ReqResult, error) {
 	start := time.Now()
 
@@ -175,7 +183,12 @@ func (tg *TcpGroup) doReq(conn net.Conn, httpByte []byte) (*ReqResult, error) {
 		return nil, fmt.Errorf("set read deadline: %w", err)
 	}
 
-	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	// 从对象池获取 reader
+	br := bufioReaderPool.Get().(*bufio.Reader)
+	br.Reset(conn)
+	defer bufioReaderPool.Put(br)
+
+	resp, err := http.ReadResponse(br, nil)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
@@ -183,9 +196,9 @@ func (tg *TcpGroup) doReq(conn net.Conn, httpByte []byte) (*ReqResult, error) {
 
 	respTime := time.Since(start).Nanoseconds()
 
-	return &ReqResult{
-		code:    resp.StatusCode,
-		start:   start,
-		reqtime: respTime,
-	}, nil
+	result := GetReqResult()
+	result.code = resp.StatusCode
+	result.start = start
+	result.reqtime = respTime
+	return result, nil
 }

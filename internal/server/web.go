@@ -122,7 +122,9 @@ func (s *WebServer) handleStopTest(w http.ResponseWriter, r *http.Request) {
 		atomic.StoreInt32(&s.isRunning, 0)
 
 		result := s.getFinshTestResult()
-
+		if result.Duration == 0 {
+			result = TestResult{0, 0, 0, 0, 0, 0, 0, 0, map[int]int{}}
+		}
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status": "stopped",

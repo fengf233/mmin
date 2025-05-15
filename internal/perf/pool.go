@@ -271,8 +271,12 @@ func (pool *ConnPool) getConn(dialer *net.Dialer) (net.Conn, error) {
 }
 
 func (pool *ConnPool) Get() *MyConn {
-	myconn := <-pool.connsChan
-	return myconn
+	select {
+	case <-pool.ctx.ctx.Done():
+		return nil
+	case myconn := <-pool.connsChan:
+		return myconn
+	}
 }
 
 // 获取连接
@@ -321,23 +325,22 @@ func (pool *ConnPool) factory() {
 		select {
 		case <-pool.ctx.ctx.Done():
 			return
-		case conn, ok := <-pool.factoryChan:
+		case myconn, ok := <-pool.factoryChan:
 			if !ok {
 				return
 			}
 
-			conn.Close()
+			myconn.Close()
 			atomic.AddInt32(&ActiveConnCount, -1)
-
-			newConn, err := pool.getConn(conn.dialer)
+			newConn, err := pool.getConn(myconn.dialer)
 			if err != nil {
-				pool.factoryChan <- conn // retry
+				pool.factoryChan <- myconn // retry
 				continue
 			}
 
-			conn.Conn = newConn
+			myconn.Conn = newConn
 			atomic.AddInt32(&ActiveConnCount, 1)
-			pool.connsChan <- conn
+			pool.connsChan <- myconn
 		}
 	}
 }
